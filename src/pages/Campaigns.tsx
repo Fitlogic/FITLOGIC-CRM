@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Mail, Plus, Send, Clock, FileText, Eye, Pencil, Users, BarChart3,
   Calendar, Search, ChevronRight, Trash2, Copy, Pause, Play, ArrowLeft,
-  MousePointerClick, UserMinus, AlertTriangle, Check, X
+  MousePointerClick, UserMinus, AlertTriangle, Check, X, Sparkles
 } from "lucide-react";
 import {
   AlertDialog,
