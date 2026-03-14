@@ -117,6 +117,7 @@ const Campaigns_Page = () => {
   const handleDeleteCampaign = (id: string) => {
     setCampaigns(prev => prev.filter(c => c.id !== id));
     if (selectedCampaign?.id === id) setSelectedCampaign(null);
+    setDeletingCampaignId(null);
     toast({ title: "Campaign deleted" });
   };
 
