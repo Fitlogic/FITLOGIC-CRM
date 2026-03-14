@@ -22,6 +22,7 @@ const mainItems = [
   { title: "FAQ Manager", url: "/faqs", icon: FileText },
   { title: "Intake Forms", url: "/intake", icon: ClipboardList },
   { title: "Campaigns", url: "/campaigns", icon: Mail },
+  { title: "Patients", url: "/patients", icon: Users },
 ];
 
 const comingSoon = [
