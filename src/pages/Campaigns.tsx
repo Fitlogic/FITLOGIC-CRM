@@ -4,6 +4,16 @@ import {
   Calendar, Search, ChevronRight, Trash2, Copy, Pause, Play, ArrowLeft,
   MousePointerClick, UserMinus, AlertTriangle, Check, X
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -41,6 +51,10 @@ const Campaigns_Page = () => {
 
   // Preview
   const [previewTemplate, setPreviewTemplate] = useState<EmailTemplate | null>(null);
+
+  // Delete confirmation state
+  const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
 
   /* ── Campaign actions ── */
   const handleCreateCampaign = () => {
@@ -103,6 +117,7 @@ const Campaigns_Page = () => {
   const handleDeleteCampaign = (id: string) => {
     setCampaigns(prev => prev.filter(c => c.id !== id));
     if (selectedCampaign?.id === id) setSelectedCampaign(null);
+    setDeletingCampaignId(null);
     toast({ title: "Campaign deleted" });
   };
 
@@ -141,6 +156,7 @@ const Campaigns_Page = () => {
 
   const handleDeleteTemplate = (id: string) => {
     setTemplates(prev => prev.filter(t => t.id !== id));
+    setDeletingTemplateId(null);
     toast({ title: "Template deleted" });
   };
 
@@ -171,7 +187,7 @@ const Campaigns_Page = () => {
     const stats = selectedCampaign.stats;
 
     return (
-      <div className="space-y-6">
+      <div className="p-6 space-y-6">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => setSelectedCampaign(null)}>
             <ArrowLeft className="h-4 w-4" />
@@ -302,7 +318,7 @@ const Campaigns_Page = () => {
 
   /* ── Main view ── */
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -388,7 +404,7 @@ const Campaigns_Page = () => {
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDuplicateCampaign(campaign)}>
                       <Copy className="h-3 w-3" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteCampaign(campaign.id)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeletingCampaignId(campaign.id)}>
                       <Trash2 className="h-3 w-3" />
                     </Button>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -416,7 +432,7 @@ const Campaigns_Page = () => {
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingTemplate(template); setShowTemplateEditor(true); }}>
                           <Pencil className="h-3 w-3" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteTemplate(template.id)}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeletingTemplateId(template.id)}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -581,6 +597,34 @@ const Campaigns_Page = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete campaign confirmation */}
+      <AlertDialog open={!!deletingCampaignId} onOpenChange={(open) => !open && setDeletingCampaignId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this campaign?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently remove the campaign and its data. This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deletingCampaignId && handleDeleteCampaign(deletingCampaignId)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete template confirmation */}
+      <AlertDialog open={!!deletingTemplateId} onOpenChange={(open) => !open && setDeletingTemplateId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this template?</AlertDialogTitle>
+            <AlertDialogDescription>This will permanently remove the email template. Campaigns using it will need a new template.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deletingTemplateId && handleDeleteTemplate(deletingTemplateId)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

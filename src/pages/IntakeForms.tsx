@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   INTAKE_FORMS,
   FORM_SUBMISSIONS,
@@ -608,8 +609,25 @@ const IntakeForms = () => {
                         <Eye className="h-3 w-3 mr-1" />
                         Preview
                       </Button>
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => {
+                        const dup: IntakeForm = {
+                          ...selectedForm,
+                          id: `form-${Date.now()}`,
+                          name: `${selectedForm.name} (Copy)`,
+                          active: false,
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString(),
+                          submissionCount: 0,
+                        };
+                        setForms((prev) => [...prev, dup]);
+                        setSelectedFormId(dup.id);
+                        toast.success("Form duplicated");
+                      }}>
                         <Copy className="h-3 w-3 mr-1" />
+                        Duplicate
+                      </Button>
+                      <Button size="sm" variant="outline">
+                        <ExternalLink className="h-3 w-3 mr-1" />
                         Copy Link
                       </Button>
                     </div>
