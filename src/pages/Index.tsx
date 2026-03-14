@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { INQUIRIES, type Inquiry, type InquiryCategory, type InquirySource } from "@/lib/mock-data";
-import { InquiryList } from "@/components/InquiryList";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { InquiryList, type InquiryRow } from "@/components/InquiryList";
 import { InquiryDetail } from "@/components/InquiryDetail";
 import { MessageSquare, Plus, Phone, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import type { InquiryCategory, InquirySource } from "@/lib/types";
 
 const CATEGORIES: { value: InquiryCategory; label: string }[] = [
   { value: "Appointment_Scheduling", label: "Scheduling" },
@@ -21,7 +23,7 @@ const CATEGORIES: { value: InquiryCategory; label: string }[] = [
 ];
 
 const Index = () => {
-  const [inquiries, setInquiries] = useState<Inquiry[]>(INQUIRIES);
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNewInquiry, setShowNewInquiry] = useState(false);
   const [newInquiry, setNewInquiry] = useState({
@@ -32,43 +34,69 @@ const Index = () => {
     category: "General_Info" as InquiryCategory,
   });
 
+  const { data: inquiries = [] } = useQuery({
+    queryKey: ["inquiries"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("inquiries")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as InquiryRow[];
+    },
+  });
+
   const selectedInquiry = inquiries.find((i) => i.id === selectedId) || null;
 
-  const handleUpdate = (id: string, updates: Partial<Inquiry>) => {
-    setInquiries((prev) => prev.map((inq) => (inq.id === id ? { ...inq, ...updates } : inq)));
+  const handleUpdate = (id: string, updates: Partial<InquiryRow>) => {
+    // Optimistic update
+    queryClient.setQueryData(["inquiries"], (old: InquiryRow[] | undefined) =>
+      old?.map((inq) => (inq.id === id ? { ...inq, ...updates } : inq)) || []
+    );
   };
+
+  const createMutation = useMutation({
+    mutationFn: async (input: typeof newInquiry) => {
+      // Auto-create patient via DB function
+      const { data: patientId } = await supabase.rpc("find_or_create_patient", {
+        p_name: input.patientName,
+        p_email: input.patientEmail || null,
+      });
+
+      const { data, error } = await supabase.from("inquiries").insert({
+        patient_id: patientId,
+        patient_name: input.patientName,
+        patient_email: input.patientEmail || null,
+        source: input.source,
+        raw_content: input.rawContent,
+        category: input.category,
+        category_confidence: 1,
+        status: "pending",
+      }).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["inquiries"] });
+      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      setSelectedId(data.id);
+      setShowNewInquiry(false);
+      setNewInquiry({ patientName: "", patientEmail: "", source: "phone", rawContent: "", category: "General_Info" });
+      toast.success("Inquiry created");
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const handleCreateInquiry = () => {
     if (!newInquiry.patientName.trim() || !newInquiry.rawContent.trim()) {
       toast.error("Patient name and message are required");
       return;
     }
-    const inquiry: Inquiry = {
-      id: `inq-${Date.now()}`,
-      patientName: newInquiry.patientName,
-      patientEmail: newInquiry.patientEmail || "",
-      source: newInquiry.source,
-      rawContent: newInquiry.rawContent,
-      category: newInquiry.category,
-      categoryConfidence: 1,
-      isFaqMatch: false,
-      assignedTo: null,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-      resolvedAt: null,
-      responseText: null,
-      staffNotes: null,
-    };
-    setInquiries((prev) => [inquiry, ...prev]);
-    setSelectedId(inquiry.id);
-    setShowNewInquiry(false);
-    setNewInquiry({ patientName: "", patientEmail: "", source: "phone", rawContent: "", category: "General_Info" });
-    toast.success("Inquiry created");
+    createMutation.mutate(newInquiry);
   };
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)]">
-      {/* Left: Inquiry List */}
       <div className="w-[420px] border-r flex-shrink-0 bg-card flex flex-col">
         <div className="p-3 border-b flex justify-end">
           <Button size="sm" className="gradient-brand text-primary-foreground" onClick={() => setShowNewInquiry(true)}>
@@ -80,7 +108,6 @@ const Index = () => {
         </div>
       </div>
 
-      {/* Right: Detail Panel */}
       <div className="flex-1 min-w-0">
         {selectedInquiry ? (
           <InquiryDetail inquiry={selectedInquiry} onUpdate={handleUpdate} />
@@ -95,7 +122,6 @@ const Index = () => {
         )}
       </div>
 
-      {/* Manual Inquiry Dialog */}
       <Dialog open={showNewInquiry} onOpenChange={setShowNewInquiry}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -106,29 +132,17 @@ const Index = () => {
           <div className="space-y-4">
             <div>
               <Label>Patient Name *</Label>
-              <Input
-                value={newInquiry.patientName}
-                onChange={(e) => setNewInquiry((p) => ({ ...p, patientName: e.target.value }))}
-                placeholder="e.g. Jane Smith"
-                className="mt-1"
-              />
+              <Input value={newInquiry.patientName} onChange={(e) => setNewInquiry((p) => ({ ...p, patientName: e.target.value }))} placeholder="e.g. Jane Smith" className="mt-1" />
             </div>
             <div>
               <Label>Email (optional)</Label>
-              <Input
-                value={newInquiry.patientEmail}
-                onChange={(e) => setNewInquiry((p) => ({ ...p, patientEmail: e.target.value }))}
-                placeholder="patient@email.com"
-                className="mt-1"
-              />
+              <Input value={newInquiry.patientEmail} onChange={(e) => setNewInquiry((p) => ({ ...p, patientEmail: e.target.value }))} placeholder="patient@email.com" className="mt-1" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Source</Label>
                 <Select value={newInquiry.source} onValueChange={(v) => setNewInquiry((p) => ({ ...p, source: v as InquirySource }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="phone"><span className="flex items-center gap-1.5"><Phone className="h-3 w-3" /> Phone</span></SelectItem>
                     <SelectItem value="manual"><span className="flex items-center gap-1.5"><PenLine className="h-3 w-3" /> Walk-in</span></SelectItem>
@@ -140,9 +154,7 @@ const Index = () => {
               <div>
                 <Label>Category</Label>
                 <Select value={newInquiry.category} onValueChange={(v) => setNewInquiry((p) => ({ ...p, category: v as InquiryCategory }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {CATEGORIES.map((c) => (
                       <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
@@ -153,17 +165,14 @@ const Index = () => {
             </div>
             <div>
               <Label>Message / Notes *</Label>
-              <Textarea
-                value={newInquiry.rawContent}
-                onChange={(e) => setNewInquiry((p) => ({ ...p, rawContent: e.target.value }))}
-                placeholder="Describe the patient's inquiry..."
-                className="mt-1 min-h-[100px]"
-              />
+              <Textarea value={newInquiry.rawContent} onChange={(e) => setNewInquiry((p) => ({ ...p, rawContent: e.target.value }))} placeholder="Describe the patient's inquiry..." className="mt-1 min-h-[100px]" />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewInquiry(false)}>Cancel</Button>
-            <Button className="gradient-brand text-primary-foreground" onClick={handleCreateInquiry}>Create Inquiry</Button>
+            <Button className="gradient-brand text-primary-foreground" onClick={handleCreateInquiry} disabled={createMutation.isPending}>
+              {createMutation.isPending ? "Creating..." : "Create Inquiry"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
