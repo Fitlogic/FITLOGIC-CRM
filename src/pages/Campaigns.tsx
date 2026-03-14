@@ -52,6 +52,10 @@ const Campaigns_Page = () => {
   // Preview
   const [previewTemplate, setPreviewTemplate] = useState<EmailTemplate | null>(null);
 
+  // Delete confirmation state
+  const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
+
   /* ── Campaign actions ── */
   const handleCreateCampaign = () => {
     setEditingCampaign({ name: "", status: "draft", templateId: "", segmentId: "", scheduledAt: null });
