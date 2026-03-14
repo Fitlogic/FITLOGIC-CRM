@@ -93,7 +93,7 @@ export function AppSidebar() {
       <SidebarFooter className="p-4">
         {!collapsed && (
           <div className="rounded-lg bg-sidebar-accent/50 p-3">
-            <p className="text-[11px] text-sidebar-foreground/70">Phase 1 — Inquiry System</p>
+            <p className="text-[11px] text-sidebar-foreground/70">Phase 3 — Email Campaigns</p>
           </div>
         )}
       </SidebarFooter>
