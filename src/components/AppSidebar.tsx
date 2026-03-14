@@ -21,10 +21,10 @@ const mainItems = [
   { title: "Inquiries", url: "/", icon: MessageSquare },
   { title: "FAQ Manager", url: "/faqs", icon: FileText },
   { title: "Intake Forms", url: "/intake", icon: ClipboardList },
+  { title: "Campaigns", url: "/campaigns", icon: Mail },
 ];
 
 const comingSoon = [
-  { title: "Campaigns", url: "/campaigns", icon: Mail },
   { title: "Patients", url: "/patients", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Settings", url: "/settings", icon: Settings },
