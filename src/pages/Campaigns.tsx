@@ -331,6 +331,9 @@ const Campaigns_Page = () => {
           <Button variant="outline" size="sm" onClick={handleCreateTemplate}>
             <FileText className="h-3.5 w-3.5 mr-1" /> New Template
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowAICreator(true)}>
+            <Sparkles className="h-3.5 w-3.5 mr-1" /> AI Creator
+          </Button>
           <Button size="sm" className="gradient-brand text-primary-foreground shadow-glow" onClick={handleCreateCampaign}>
             <Plus className="h-3.5 w-3.5 mr-1" /> New Campaign
           </Button>
