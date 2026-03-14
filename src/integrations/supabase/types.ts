@@ -47,6 +47,282 @@ export type Database = {
         }
         Relationships: []
       }
+      campaigns: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          scheduled_at: string | null
+          segment_id: string | null
+          sent_at: string | null
+          stats: Json | null
+          status: string
+          template_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          scheduled_at?: string | null
+          segment_id?: string | null
+          sent_at?: string | null
+          stats?: Json | null
+          status?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          scheduled_at?: string | null
+          segment_id?: string | null
+          sent_at?: string | null
+          stats?: Json | null
+          status?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_segment_id_fkey"
+            columns: ["segment_id"]
+            isOneToOne: false
+            referencedRelation: "segments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaigns_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_templates: {
+        Row: {
+          body_html: string | null
+          category: string
+          created_at: string
+          id: string
+          name: string
+          preview_text: string | null
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          body_html?: string | null
+          category?: string
+          created_at?: string
+          id?: string
+          name: string
+          preview_text?: string | null
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          body_html?: string | null
+          category?: string
+          created_at?: string
+          id?: string
+          name?: string
+          preview_text?: string | null
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      faqs: {
+        Row: {
+          active: boolean
+          answer: string
+          category: string
+          created_at: string
+          id: string
+          question: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          answer: string
+          category?: string
+          created_at?: string
+          id?: string
+          question: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          answer?: string
+          category?: string
+          created_at?: string
+          id?: string
+          question?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      inquiries: {
+        Row: {
+          assigned_to: string | null
+          category: string
+          category_confidence: number | null
+          created_at: string
+          id: string
+          is_faq_match: boolean | null
+          patient_email: string | null
+          patient_id: string | null
+          patient_name: string
+          raw_content: string
+          resolved_at: string | null
+          response_text: string | null
+          source: string
+          staff_notes: string | null
+          status: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          category?: string
+          category_confidence?: number | null
+          created_at?: string
+          id?: string
+          is_faq_match?: boolean | null
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_name: string
+          raw_content: string
+          resolved_at?: string | null
+          response_text?: string | null
+          source?: string
+          staff_notes?: string | null
+          status?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          category?: string
+          category_confidence?: number | null
+          created_at?: string
+          id?: string
+          is_faq_match?: boolean | null
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_name?: string
+          raw_content?: string
+          resolved_at?: string | null
+          response_text?: string | null
+          source?: string
+          staff_notes?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inquiries_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inquiries_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      intake_forms: {
+        Row: {
+          active: boolean
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          questions: Json
+          submission_count: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          questions?: Json
+          submission_count?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          questions?: Json
+          submission_count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      intake_submissions: {
+        Row: {
+          completion_status: string
+          created_at: string
+          form_id: string
+          id: string
+          patient_email: string | null
+          patient_id: string | null
+          patient_name: string
+          review_status: string
+          staff_notes: string | null
+          submission_data: Json
+          submitted_at: string | null
+        }
+        Insert: {
+          completion_status?: string
+          created_at?: string
+          form_id: string
+          id?: string
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_name: string
+          review_status?: string
+          staff_notes?: string | null
+          submission_data?: Json
+          submitted_at?: string | null
+        }
+        Update: {
+          completion_status?: string
+          created_at?: string
+          form_id?: string
+          id?: string
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_name?: string
+          review_status?: string
+          staff_notes?: string | null
+          submission_data?: Json
+          submitted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_submissions_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "intake_forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_submissions_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       patients: {
         Row: {
           address: string | null
@@ -110,12 +386,75 @@ export type Database = {
         }
         Relationships: []
       }
+      segments: {
+        Row: {
+          color: string | null
+          created_at: string
+          description: string | null
+          estimated_count: number
+          id: string
+          name: string
+          rules: Json
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          estimated_count?: number
+          id?: string
+          name: string
+          rules?: Json
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          estimated_count?: number
+          id?: string
+          name?: string
+          rules?: Json
+        }
+        Relationships: []
+      }
+      staff: {
+        Row: {
+          active: boolean
+          categories_handled: string[] | null
+          created_at: string
+          email: string
+          id: string
+          name: string
+          role: string
+        }
+        Insert: {
+          active?: boolean
+          categories_handled?: string[] | null
+          created_at?: string
+          email: string
+          id?: string
+          name: string
+          role?: string
+        }
+        Update: {
+          active?: boolean
+          categories_handled?: string[] | null
+          created_at?: string
+          email?: string
+          id?: string
+          name?: string
+          role?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      find_or_create_patient: {
+        Args: { p_email?: string; p_name: string }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
