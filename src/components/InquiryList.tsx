@@ -6,12 +6,30 @@ import { CategoryBadge } from "@/components/CategoryBadge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import type { Inquiry, InquiryCategory, InquiryStatus } from "@/lib/mock-data";
+import type { InquiryCategory, InquiryStatus, InquirySource } from "@/lib/types";
 
-const sourceIcons = { email: Mail, portal: Globe, phone: Phone, manual: PenLine };
+const sourceIcons: Record<string, any> = { email: Mail, portal: Globe, phone: Phone, manual: PenLine };
+
+export interface InquiryRow {
+  id: string;
+  patient_id: string | null;
+  patient_name: string;
+  patient_email: string | null;
+  source: string;
+  raw_content: string;
+  category: string;
+  category_confidence: number | null;
+  is_faq_match: boolean | null;
+  assigned_to: string | null;
+  status: string;
+  response_text: string | null;
+  staff_notes: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
 
 interface Props {
-  inquiries: Inquiry[];
+  inquiries: InquiryRow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }
@@ -22,17 +40,18 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const filtered = inquiries.filter((inq) => {
-    if (search && !inq.patientName.toLowerCase().includes(search.toLowerCase()) && !inq.rawContent.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !inq.patient_name.toLowerCase().includes(search.toLowerCase()) && !inq.raw_content.toLowerCase().includes(search.toLowerCase())) return false;
     if (categoryFilter !== "all" && inq.category !== categoryFilter) return false;
     if (statusFilter !== "all" && inq.status !== statusFilter) return false;
     return true;
   });
 
-  // Sort: escalated first, then pending, then by date
+  const priorityMap: Record<string, number> = { escalated: 0, pending: 1, assigned: 2, auto_responded: 3, resolved: 4 };
   const sorted = [...filtered].sort((a, b) => {
-    const priority: Record<InquiryStatus, number> = { escalated: 0, pending: 1, assigned: 2, auto_responded: 3, resolved: 4 };
-    if (priority[a.status] !== priority[b.status]) return priority[a.status] - priority[b.status];
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    const pa = priorityMap[a.status] ?? 5;
+    const pb = priorityMap[b.status] ?? 5;
+    if (pa !== pb) return pa - pb;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
   const urgentCount = inquiries.filter((i) => i.status === "escalated" || i.category === "Urgent_Red_Flags").length;
@@ -40,7 +59,6 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Stats bar */}
       <div className="flex items-center gap-4 px-4 py-3 border-b bg-card">
         <div className="flex items-center gap-2">
           <span className="text-2xl font-heading font-bold">{inquiries.length}</span>
@@ -57,16 +75,10 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="flex items-center gap-2 px-4 py-3 border-b">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search inquiries..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-9 bg-background"
-          />
+          <Input placeholder="Search inquiries..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-9 bg-background" />
         </div>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-[130px] h-9">
@@ -98,10 +110,9 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
         </Select>
       </div>
 
-      {/* List */}
       <div className="flex-1 overflow-auto">
         {sorted.map((inq) => {
-          const SourceIcon = sourceIcons[inq.source];
+          const SourceIcon = sourceIcons[inq.source] || Mail;
           const isSelected = selectedId === inq.id;
           const isUrgent = inq.category === "Urgent_Red_Flags" || inq.status === "escalated";
 
@@ -118,18 +129,18 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
               <div className="flex items-start justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-2 min-w-0">
                   <SourceIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="font-medium text-sm truncate">{inq.patientName}</span>
+                  <span className="font-medium text-sm truncate">{inq.patient_name}</span>
                 </div>
                 <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-                  {formatDistanceToNow(new Date(inq.createdAt), { addSuffix: true })}
+                  {formatDistanceToNow(new Date(inq.created_at), { addSuffix: true })}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{inq.rawContent}</p>
+              <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{inq.raw_content}</p>
               <div className="flex items-center gap-1.5">
-                <CategoryBadge category={inq.category} />
-                <StatusBadge status={inq.status} />
-                {inq.categoryConfidence < 0.9 && (
-                  <span className="text-[10px] text-muted-foreground">({Math.round(inq.categoryConfidence * 100)}%)</span>
+                <CategoryBadge category={inq.category as InquiryCategory} />
+                <StatusBadge status={inq.status as InquiryStatus} />
+                {(inq.category_confidence ?? 0) < 0.9 && (
+                  <span className="text-[10px] text-muted-foreground">({Math.round((inq.category_confidence ?? 0) * 100)}%)</span>
                 )}
               </div>
             </button>
