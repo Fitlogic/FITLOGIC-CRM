@@ -25,7 +25,6 @@ const mainItems = [
 ];
 
 const comingSoon = [
-  { title: "Patients", url: "/patients", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
