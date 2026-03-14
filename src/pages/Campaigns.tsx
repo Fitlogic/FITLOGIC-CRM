@@ -35,7 +35,7 @@ interface CampaignRow {
   segment_id: string | null;
   scheduled_at: string | null;
   sent_at: string | null;
-  stats: CampaignStats | null;
+  stats: any;
   created_at: string;
   updated_at: string;
 }
