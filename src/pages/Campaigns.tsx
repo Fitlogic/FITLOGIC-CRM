@@ -29,6 +29,7 @@ import {
   CAMPAIGNS, TEMPLATES, SEGMENTS, CAMPAIGN_STATUS_CONFIG, TEMPLATE_CATEGORY_CONFIG,
   type Campaign, type EmailTemplate, type Segment, type CampaignStatus
 } from "@/lib/campaign-data";
+import { AICampaignCreator } from "@/components/AICampaignCreator";
 
 const Campaigns_Page = () => {
   const { toast } = useToast();
