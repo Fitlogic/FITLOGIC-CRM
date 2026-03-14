@@ -20,14 +20,14 @@ import {
 const mainItems = [
   { title: "Inquiries", url: "/", icon: MessageSquare },
   { title: "FAQ Manager", url: "/faqs", icon: FileText },
+  { title: "Intake Forms", url: "/intake", icon: ClipboardList },
 ];
 
 const comingSoon = [
-  { title: "Intake Forms", url: "#", icon: FileText },
-  { title: "Campaigns", url: "#", icon: Mail },
-  { title: "Patients", url: "#", icon: Users },
-  { title: "Analytics", url: "#", icon: BarChart3 },
-  { title: "Settings", url: "#", icon: Settings },
+  { title: "Campaigns", url: "/campaigns", icon: Mail },
+  { title: "Patients", url: "/patients", icon: Users },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
