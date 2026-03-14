@@ -1,4 +1,4 @@
-import { MessageSquare, FileText, Mail, Users, Settings, BarChart3 } from "lucide-react";
+import { MessageSquare, FileText, Mail, Users, Settings, BarChart3, ClipboardList } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import logo from "@/assets/fitlogic-logo.png";
