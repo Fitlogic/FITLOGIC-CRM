@@ -156,6 +156,7 @@ const Campaigns_Page = () => {
 
   const handleDeleteTemplate = (id: string) => {
     setTemplates(prev => prev.filter(t => t.id !== id));
+    setDeletingTemplateId(null);
     toast({ title: "Template deleted" });
   };
 
