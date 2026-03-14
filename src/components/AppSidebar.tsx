@@ -21,10 +21,10 @@ const mainItems = [
   { title: "Inquiries", url: "/", icon: MessageSquare },
   { title: "FAQ Manager", url: "/faqs", icon: FileText },
   { title: "Intake Forms", url: "/intake", icon: ClipboardList },
+  { title: "Campaigns", url: "/campaigns", icon: Mail },
 ];
 
 const comingSoon = [
-  { title: "Campaigns", url: "/campaigns", icon: Mail },
   { title: "Patients", url: "/patients", icon: Users },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Settings", url: "/settings", icon: Settings },
@@ -93,7 +93,7 @@ export function AppSidebar() {
       <SidebarFooter className="p-4">
         {!collapsed && (
           <div className="rounded-lg bg-sidebar-accent/50 p-3">
-            <p className="text-[11px] text-sidebar-foreground/70">Phase 1 — Inquiry System</p>
+            <p className="text-[11px] text-sidebar-foreground/70">Phase 3 — Email Campaigns</p>
           </div>
         )}
       </SidebarFooter>
