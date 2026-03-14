@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Mail, Plus, Send, Clock, FileText, Eye, Pencil, Users, BarChart3,
   Calendar, Search, ChevronRight, Trash2, Copy, Pause, Play, ArrowLeft,
-  MousePointerClick, UserMinus, AlertTriangle, Check, X
+  MousePointerClick, UserMinus, AlertTriangle, Check, X, Sparkles
 } from "lucide-react";
 import {
   AlertDialog,
@@ -29,6 +29,7 @@ import {
   CAMPAIGNS, TEMPLATES, SEGMENTS, CAMPAIGN_STATUS_CONFIG, TEMPLATE_CATEGORY_CONFIG,
   type Campaign, type EmailTemplate, type Segment, type CampaignStatus
 } from "@/lib/campaign-data";
+import { AICampaignCreator } from "@/components/AICampaignCreator";
 
 const Campaigns_Page = () => {
   const { toast } = useToast();
@@ -55,6 +56,7 @@ const Campaigns_Page = () => {
   // Delete confirmation state
   const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
+  const [showAICreator, setShowAICreator] = useState(false);
 
   /* ── Campaign actions ── */
   const handleCreateCampaign = () => {
@@ -328,6 +330,9 @@ const Campaigns_Page = () => {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleCreateTemplate}>
             <FileText className="h-3.5 w-3.5 mr-1" /> New Template
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowAICreator(true)}>
+            <Sparkles className="h-3.5 w-3.5 mr-1" /> AI Creator
           </Button>
           <Button size="sm" className="gradient-brand text-primary-foreground shadow-glow" onClick={handleCreateCampaign}>
             <Plus className="h-3.5 w-3.5 mr-1" /> New Campaign
@@ -625,6 +630,51 @@ const Campaigns_Page = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* AI Campaign Creator */}
+      <AICampaignCreator
+        open={showAICreator}
+        onOpenChange={setShowAICreator}
+        segments={segments}
+        onAccept={(result) => {
+          // Create template from AI result
+          const now = new Date().toISOString();
+          const newTemplate: EmailTemplate = {
+            id: `t${Date.now()}`,
+            name: result.campaignName + " Template",
+            subject: result.subject,
+            previewText: result.previewText,
+            bodyHtml: result.bodyHtml,
+            category: result.category,
+            createdAt: now,
+            updatedAt: now,
+          };
+          setTemplates(prev => [newTemplate, ...prev]);
+
+          // Find matching segment
+          const matchedSegment = segments.find(s => 
+            s.name.toLowerCase().includes(result.suggestedSegment.toLowerCase()) ||
+            result.suggestedSegment.toLowerCase().includes(s.name.toLowerCase())
+          );
+
+          // Create campaign
+          const newCampaign: Campaign = {
+            id: `c${Date.now()}`,
+            name: result.campaignName,
+            status: "draft",
+            templateId: newTemplate.id,
+            segmentId: matchedSegment?.id || segments[0]?.id || "",
+            scheduledAt: null,
+            sentAt: null,
+            stats: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          setCampaigns(prev => [newCampaign, ...prev]);
+          setSelectedCampaign(newCampaign);
+          toast({ title: "AI Campaign Created", description: `"${result.campaignName}" is ready. Suggested send: ${result.sendTimeRecommendation}` });
+        }}
+      />
     </div>
   );
 };
