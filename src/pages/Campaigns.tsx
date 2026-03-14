@@ -630,6 +630,51 @@ const Campaigns_Page = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* AI Campaign Creator */}
+      <AICampaignCreator
+        open={showAICreator}
+        onOpenChange={setShowAICreator}
+        segments={segments}
+        onAccept={(result) => {
+          // Create template from AI result
+          const now = new Date().toISOString();
+          const newTemplate: EmailTemplate = {
+            id: `t${Date.now()}`,
+            name: result.campaignName + " Template",
+            subject: result.subject,
+            previewText: result.previewText,
+            bodyHtml: result.bodyHtml,
+            category: result.category,
+            createdAt: now,
+            updatedAt: now,
+          };
+          setTemplates(prev => [newTemplate, ...prev]);
+
+          // Find matching segment
+          const matchedSegment = segments.find(s => 
+            s.name.toLowerCase().includes(result.suggestedSegment.toLowerCase()) ||
+            result.suggestedSegment.toLowerCase().includes(s.name.toLowerCase())
+          );
+
+          // Create campaign
+          const newCampaign: Campaign = {
+            id: `c${Date.now()}`,
+            name: result.campaignName,
+            status: "draft",
+            templateId: newTemplate.id,
+            segmentId: matchedSegment?.id || segments[0]?.id || "",
+            scheduledAt: null,
+            sentAt: null,
+            stats: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          setCampaigns(prev => [newCampaign, ...prev]);
+          setSelectedCampaign(newCampaign);
+          toast({ title: "AI Campaign Created", description: `"${result.campaignName}" is ready. Suggested send: ${result.sendTimeRecommendation}` });
+        }}
+      />
     </div>
   );
 };
