@@ -56,6 +56,7 @@ const Campaigns_Page = () => {
   // Delete confirmation state
   const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
+  const [showAICreator, setShowAICreator] = useState(false);
 
   /* ── Campaign actions ── */
   const handleCreateCampaign = () => {
