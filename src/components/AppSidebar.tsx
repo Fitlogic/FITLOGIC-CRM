@@ -1,4 +1,4 @@
-import { MessageSquare, FileText, Mail, Users, Settings, BarChart3 } from "lucide-react";
+import { MessageSquare, FileText, Mail, Users, Settings, BarChart3, ClipboardList } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import logo from "@/assets/fitlogic-logo.png";
@@ -20,14 +20,14 @@ import {
 const mainItems = [
   { title: "Inquiries", url: "/", icon: MessageSquare },
   { title: "FAQ Manager", url: "/faqs", icon: FileText },
+  { title: "Intake Forms", url: "/intake", icon: ClipboardList },
 ];
 
 const comingSoon = [
-  { title: "Intake Forms", url: "#", icon: FileText },
-  { title: "Campaigns", url: "#", icon: Mail },
-  { title: "Patients", url: "#", icon: Users },
-  { title: "Analytics", url: "#", icon: BarChart3 },
-  { title: "Settings", url: "#", icon: Settings },
+  { title: "Campaigns", url: "/campaigns", icon: Mail },
+  { title: "Patients", url: "/patients", icon: Users },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -77,9 +77,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {comingSoon.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton disabled className="opacity-40 cursor-not-allowed">
-                    <item.icon className="h-4 w-4" />
-                    {!collapsed && <span>{item.title}</span>}
+                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                    <NavLink to={item.url} activeClassName="bg-sidebar-accent text-sidebar-primary">
+                      <item.icon className="h-4 w-4" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
