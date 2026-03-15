@@ -406,6 +406,7 @@ export default function Patients() {
               insurance_provider: editing.insurance_provider || "",
               insurance_id: editing.insurance_id || "",
               status: editing.status,
+              tags: (editing.tags || []).join(", "),
               notes: editing.notes || "",
             } : undefined}
             onSubmit={(data) =>
