@@ -83,6 +83,8 @@ export default function Patients() {
     },
   });
 
+  const parseTags = (t: string) => t ? t.split(",").map(s => s.trim()).filter(Boolean) : [];
+
   const addMutation = useMutation({
     mutationFn: async (form: PatientFormData) => {
       const { error } = await supabase.from("patients").insert({
@@ -99,6 +101,7 @@ export default function Patients() {
         insurance_provider: form.insurance_provider || null,
         insurance_id: form.insurance_id || null,
         status: form.status,
+        tags: parseTags(form.tags),
         notes: form.notes || null,
       });
       if (error) throw error;
