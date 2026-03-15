@@ -143,6 +143,11 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
       </div>
 
       <div className="space-y-1.5">
+        <Label htmlFor="tags">Tags</Label>
+        <Input id="tags" {...register("tags")} placeholder="vip, new-patient, follow-up (comma-separated)" />
+      </div>
+
+      <div className="space-y-1.5">
         <Label htmlFor="notes">Notes</Label>
         <Textarea id="notes" {...register("notes")} placeholder="Internal notes about this patient..." rows={3} />
       </div>
