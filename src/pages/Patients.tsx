@@ -116,7 +116,7 @@ export default function Patients() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, form }: { id: string; form: PatientFormData }) => {
-      const { error } = await supabase.from("patients").update({
+      const { data, error } = await supabase.from("patients").update({
         first_name: form.first_name,
         last_name: form.last_name,
         email: form.email || null,
@@ -130,15 +130,16 @@ export default function Patients() {
         insurance_provider: form.insurance_provider || null,
         insurance_id: form.insurance_id || null,
         status: form.status,
+        tags: parseTags(form.tags),
         notes: form.notes || null,
-      }).eq("id", id);
+      }).eq("id", id).select().single();
       if (error) throw error;
+      return data as Patient;
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (updatedPatient) => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
-      // Update the detail view with fresh data so it's not stale
-      if (viewing && viewing.id === variables.id) {
-        setViewing((prev) => prev ? { ...prev, ...variables.form, updated_at: new Date().toISOString() } : null);
+      if (viewing && viewing.id === updatedPatient.id) {
+        setViewing(updatedPatient);
       }
       setEditing(null);
       setFormOpen(false);
