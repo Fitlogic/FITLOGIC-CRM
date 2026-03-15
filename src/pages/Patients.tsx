@@ -83,6 +83,8 @@ export default function Patients() {
     },
   });
 
+  const parseTags = (t: string) => t ? t.split(",").map(s => s.trim()).filter(Boolean) : [];
+
   const addMutation = useMutation({
     mutationFn: async (form: PatientFormData) => {
       const { error } = await supabase.from("patients").insert({
@@ -99,6 +101,7 @@ export default function Patients() {
         insurance_provider: form.insurance_provider || null,
         insurance_id: form.insurance_id || null,
         status: form.status,
+        tags: parseTags(form.tags),
         notes: form.notes || null,
       });
       if (error) throw error;
@@ -113,7 +116,7 @@ export default function Patients() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, form }: { id: string; form: PatientFormData }) => {
-      const { error } = await supabase.from("patients").update({
+      const { data, error } = await supabase.from("patients").update({
         first_name: form.first_name,
         last_name: form.last_name,
         email: form.email || null,
@@ -127,12 +130,17 @@ export default function Patients() {
         insurance_provider: form.insurance_provider || null,
         insurance_id: form.insurance_id || null,
         status: form.status,
+        tags: parseTags(form.tags),
         notes: form.notes || null,
-      }).eq("id", id);
+      }).eq("id", id).select().single();
       if (error) throw error;
+      return data as Patient;
     },
-    onSuccess: () => {
+    onSuccess: (updatedPatient) => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
+      if (viewing && viewing.id === updatedPatient.id) {
+        setViewing(updatedPatient);
+      }
       setEditing(null);
       setFormOpen(false);
       toast({ title: "Patient updated" });
@@ -226,11 +234,18 @@ export default function Patients() {
             </CardContent>
           </Card>
 
-          {p.notes && (
+          {(p.notes || (p.tags && p.tags.length > 0)) && (
             <Card className="md:col-span-2">
-              <CardHeader><CardTitle className="text-base">Notes</CardTitle></CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{p.notes}</p>
+              <CardHeader><CardTitle className="text-base">Notes & Tags</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {p.tags && p.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {p.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                    ))}
+                  </div>
+                )}
+                {p.notes && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{p.notes}</p>}
               </CardContent>
             </Card>
           )}
@@ -398,6 +413,7 @@ export default function Patients() {
               insurance_provider: editing.insurance_provider || "",
               insurance_id: editing.insurance_id || "",
               status: editing.status,
+              tags: (editing.tags || []).join(", "),
               notes: editing.notes || "",
             } : undefined}
             onSubmit={(data) =>

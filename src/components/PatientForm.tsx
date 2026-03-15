@@ -20,6 +20,7 @@ export interface PatientFormData {
   insurance_provider: string;
   insurance_id: string;
   status: string;
+  tags: string;
   notes: string;
 }
 
@@ -46,6 +47,7 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
       insurance_provider: "",
       insurance_id: "",
       status: "active",
+      tags: "",
       notes: "",
       ...defaultValues,
     },
@@ -138,6 +140,11 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
             <SelectItem value="archived">Archived</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="tags">Tags</Label>
+        <Input id="tags" {...register("tags")} placeholder="vip, new-patient, follow-up (comma-separated)" />
       </div>
 
       <div className="space-y-1.5">
