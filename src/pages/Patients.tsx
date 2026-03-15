@@ -235,20 +235,20 @@ export default function Patients() {
           </Card>
 
           {(p.notes || (p.tags && p.tags.length > 0)) && (
-230:             <Card className="md:col-span-2">
-231:               <CardHeader><CardTitle className="text-base">Notes & Tags</CardTitle></CardHeader>
-232:               <CardContent className="space-y-3">
-233:                 {p.tags && p.tags.length > 0 && (
-234:                   <div className="flex flex-wrap gap-1.5">
-235:                     {p.tags.map((tag) => (
-236:                       <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-237:                     ))}
-238:                   </div>
-239:                 )}
-240:                 {p.notes && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{p.notes}</p>}
-241:               </CardContent>
-242:             </Card>
-243:           )}
+            <Card className="md:col-span-2">
+              <CardHeader><CardTitle className="text-base">Notes & Tags</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {p.tags && p.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {p.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                    ))}
+                  </div>
+                )}
+                {p.notes && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{p.notes}</p>}
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="md:col-span-2">
             <CardHeader><CardTitle className="text-base">Activity Timeline</CardTitle></CardHeader>
