@@ -20,6 +20,7 @@ export interface PatientFormData {
   insurance_provider: string;
   insurance_id: string;
   status: string;
+  tags: string;
   notes: string;
 }
 

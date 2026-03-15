@@ -131,8 +131,12 @@ export default function Patients() {
       }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
+      // Update the detail view with fresh data so it's not stale
+      if (viewing && viewing.id === variables.id) {
+        setViewing((prev) => prev ? { ...prev, ...variables.form, updated_at: new Date().toISOString() } : null);
+      }
       setEditing(null);
       setFormOpen(false);
       toast({ title: "Patient updated" });
