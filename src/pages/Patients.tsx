@@ -236,6 +236,13 @@ export default function Patients() {
           )}
 
           <Card className="md:col-span-2">
+            <CardHeader><CardTitle className="text-base">Activity Timeline</CardTitle></CardHeader>
+            <CardContent>
+              <PatientTimeline patientId={p.id} />
+            </CardContent>
+          </Card>
+
+          <Card className="md:col-span-2">
             <CardHeader><CardTitle className="text-base">Record Info</CardTitle></CardHeader>
             <CardContent className="text-xs text-muted-foreground space-y-1">
               <p>Created: {formatDate(p.created_at)}</p>
