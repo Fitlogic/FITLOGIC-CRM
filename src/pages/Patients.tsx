@@ -25,6 +25,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PatientForm, type PatientFormData } from "@/components/PatientForm";
+import { PatientTimeline } from "@/components/PatientTimeline";
 
 type Patient = {
   id: string;
