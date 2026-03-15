@@ -47,6 +47,7 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
       insurance_provider: "",
       insurance_id: "",
       status: "active",
+      tags: "",
       notes: "",
       ...defaultValues,
     },
