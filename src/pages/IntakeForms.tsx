@@ -384,7 +384,7 @@ const IntakeForms = () => {
       <div className="border-b bg-card p-4 shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-heading text-xl font-bold text-foreground">Intake Forms</h1>
+            <h1 className="font-heading text-xl font-bold text-foreground">Forms</h1>
             <p className="text-sm text-muted-foreground">{forms.length} templates · {submissions.length} submissions · {pendingCount} pending review</p>
           </div>
         </div>
