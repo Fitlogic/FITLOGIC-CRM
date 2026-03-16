@@ -405,26 +405,43 @@ const Campaigns_Page = () => {
       </Tabs>
 
       {/* Campaign builder */}
-      <Dialog open={showBuilder} onOpenChange={v => { if (!v) { setShowBuilder(false); setEditingCampaign(null); } }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{editingCampaign?.id ? "Edit Campaign" : "New Campaign"}</DialogTitle></DialogHeader>
+      <Dialog open={showBuilder} onOpenChange={v => { if (!v) { setShowBuilder(false); setEditingCampaign(null); setSequenceSteps([]); } }}>
+        <DialogContent className={editingCampaign?.campaign_type === "sequence" ? "max-w-3xl max-h-[90vh] overflow-y-auto" : ""}>
+          <DialogHeader><DialogTitle>{editingCampaign?.id ? "Edit Campaign" : editingCampaign?.campaign_type === "sequence" ? "New Email Sequence" : "New Campaign"}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             <div><Label className="text-sm">Name</Label><Input value={editingCampaign?.name || ""} onChange={e => setEditingCampaign(p => ({ ...p, name: e.target.value }))} /></div>
-            <div><Label className="text-sm">Template</Label>
-              <Select value={editingCampaign?.template_id || ""} onValueChange={v => setEditingCampaign(p => ({ ...p, template_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
-                <SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+            <div><Label className="text-sm">Campaign Type</Label>
+              <Select value={editingCampaign?.campaign_type || "single"} onValueChange={v => setEditingCampaign(p => ({ ...p, campaign_type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single">Single Email</SelectItem>
+                  <SelectItem value="sequence">Multi-Email Sequence</SelectItem>
+                </SelectContent>
               </Select>
             </div>
+            {editingCampaign?.campaign_type === "single" && (
+              <div><Label className="text-sm">Template</Label>
+                <Select value={editingCampaign?.template_id || ""} onValueChange={v => setEditingCampaign(p => ({ ...p, template_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
+                  <SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
             <div><Label className="text-sm">Segment</Label>
               <Select value={editingCampaign?.segment_id || ""} onValueChange={v => setEditingCampaign(p => ({ ...p, segment_id: v }))}>
                 <SelectTrigger><SelectValue placeholder="Select segment" /></SelectTrigger>
                 <SelectContent>{segments.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.estimated_count})</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            {editingCampaign?.campaign_type === "sequence" && (
+              <>
+                <Separator />
+                <SequenceBuilder steps={sequenceSteps} onChange={setSequenceSteps} />
+              </>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowBuilder(false); setEditingCampaign(null); }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowBuilder(false); setEditingCampaign(null); setSequenceSteps([]); }}>Cancel</Button>
             <Button className="gradient-brand text-primary-foreground" onClick={() => editingCampaign && saveCampaignMut.mutate(editingCampaign)} disabled={saveCampaignMut.isPending}>Save</Button>
           </DialogFooter>
         </DialogContent>
