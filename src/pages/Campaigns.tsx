@@ -77,6 +77,7 @@ const Campaigns_Page = () => {
   const [search, setSearch] = useState("");
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Partial<CampaignRow> | null>(null);
+  const [sequenceSteps, setSequenceSteps] = useState<SequenceStep[]>([]);
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Partial<TemplateRow> | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignRow | null>(null);
