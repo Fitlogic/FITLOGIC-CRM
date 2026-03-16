@@ -121,15 +121,35 @@ const Campaigns_Page = () => {
   /* Campaign mutations */
   const saveCampaignMut = useMutation({
     mutationFn: async (c: Partial<CampaignRow>) => {
+      const campaignType = c.campaign_type || "single";
       if (c.id) {
-        const { error } = await supabase.from("campaigns").update({ name: c.name, template_id: c.template_id, segment_id: c.segment_id, scheduled_at: c.scheduled_at }).eq("id", c.id);
+        const { error } = await supabase.from("campaigns").update({ name: c.name, template_id: c.template_id, segment_id: c.segment_id, scheduled_at: c.scheduled_at, campaign_type: campaignType }).eq("id", c.id);
         if (error) throw error;
+        // Update sequence steps if sequence campaign
+        if (campaignType === "sequence") {
+          await supabase.from("campaign_sequences").delete().eq("campaign_id", c.id);
+          if (sequenceSteps.length > 0) {
+            const { error: seqErr } = await supabase.from("campaign_sequences").insert(
+              sequenceSteps.map((s) => ({ campaign_id: c.id!, step_number: s.step_number, delay_days: s.delay_days, subject_override: s.subject, body_html_override: s.body_html }))
+            );
+            if (seqErr) throw seqErr;
+          }
+        }
       } else {
-        const { error } = await supabase.from("campaigns").insert({ name: c.name!, status: "draft", template_id: c.template_id!, segment_id: c.segment_id!, scheduled_at: c.scheduled_at });
+        const { data: newCampaign, error } = await supabase.from("campaigns").insert({
+          name: c.name!, status: "draft", template_id: campaignType === "single" ? c.template_id! : null, segment_id: c.segment_id!, scheduled_at: c.scheduled_at, campaign_type: campaignType,
+        }).select().single();
         if (error) throw error;
+        // Save sequence steps
+        if (campaignType === "sequence" && sequenceSteps.length > 0 && newCampaign) {
+          const { error: seqErr } = await supabase.from("campaign_sequences").insert(
+            sequenceSteps.map((s) => ({ campaign_id: newCampaign.id, step_number: s.step_number, delay_days: s.delay_days, subject_override: s.subject, body_html_override: s.body_html }))
+          );
+          if (seqErr) throw seqErr;
+        }
       }
     },
-    onSuccess: () => { invalidateAll(); setShowBuilder(false); setEditingCampaign(null); toast({ title: "Campaign saved" }); },
+    onSuccess: () => { invalidateAll(); setShowBuilder(false); setEditingCampaign(null); setSequenceSteps([]); toast({ title: "Campaign saved" }); },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
