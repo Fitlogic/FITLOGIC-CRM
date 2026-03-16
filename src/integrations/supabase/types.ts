@@ -47,6 +47,69 @@ export type Database = {
         }
         Relationships: []
       }
+      campaign_recipients: {
+        Row: {
+          campaign_id: string
+          clicked_at: string | null
+          created_at: string
+          current_step: number | null
+          email: string
+          id: string
+          last_error: string | null
+          name: string | null
+          opened_at: string | null
+          patient_id: string | null
+          sent_at: string | null
+          source: string
+          status: string
+        }
+        Insert: {
+          campaign_id: string
+          clicked_at?: string | null
+          created_at?: string
+          current_step?: number | null
+          email: string
+          id?: string
+          last_error?: string | null
+          name?: string | null
+          opened_at?: string | null
+          patient_id?: string | null
+          sent_at?: string | null
+          source?: string
+          status?: string
+        }
+        Update: {
+          campaign_id?: string
+          clicked_at?: string | null
+          created_at?: string
+          current_step?: number | null
+          email?: string
+          id?: string
+          last_error?: string | null
+          name?: string | null
+          opened_at?: string | null
+          patient_id?: string | null
+          sent_at?: string | null
+          source?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_recipients_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_recipients_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_sequences: {
         Row: {
           body_html_override: string | null
@@ -97,39 +160,63 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          auto_schedule: boolean | null
+          business_days: string[] | null
+          business_hours_end: number | null
+          business_hours_start: number | null
           campaign_type: string
           created_at: string
           id: string
+          max_sends_per_day: number | null
           name: string
+          next_send_at: string | null
+          recipient_count: number | null
           scheduled_at: string | null
           segment_id: string | null
           sent_at: string | null
+          sent_count: number | null
           stats: Json | null
           status: string
           template_id: string | null
           updated_at: string
         }
         Insert: {
+          auto_schedule?: boolean | null
+          business_days?: string[] | null
+          business_hours_end?: number | null
+          business_hours_start?: number | null
           campaign_type?: string
           created_at?: string
           id?: string
+          max_sends_per_day?: number | null
           name: string
+          next_send_at?: string | null
+          recipient_count?: number | null
           scheduled_at?: string | null
           segment_id?: string | null
           sent_at?: string | null
+          sent_count?: number | null
           stats?: Json | null
           status?: string
           template_id?: string | null
           updated_at?: string
         }
         Update: {
+          auto_schedule?: boolean | null
+          business_days?: string[] | null
+          business_hours_end?: number | null
+          business_hours_start?: number | null
           campaign_type?: string
           created_at?: string
           id?: string
+          max_sends_per_day?: number | null
           name?: string
+          next_send_at?: string | null
+          recipient_count?: number | null
           scheduled_at?: string | null
           segment_id?: string | null
           sent_at?: string | null
+          sent_count?: number | null
           stats?: Json | null
           status?: string
           template_id?: string | null
