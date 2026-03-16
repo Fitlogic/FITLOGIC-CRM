@@ -341,7 +341,7 @@ const IntakeForms = () => {
     mutationFn: async () => {
       const { data, error } = await supabase.from("intake_forms").insert({
         name: "Untitled Form",
-        description: "New intake form",
+        description: "New form",
         questions: [],
         active: false,
       }).select().single();
