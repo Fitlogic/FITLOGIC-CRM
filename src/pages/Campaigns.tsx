@@ -353,8 +353,9 @@ const Campaigns_Page = () => {
                     <div className="flex items-center gap-2 mb-0.5">
                       <h3 className="font-heading font-semibold text-foreground truncate">{campaign.name}</h3>
                       <Badge className={`${cfg.bgColor} ${cfg.color} border-0 text-[10px]`}>{cfg.label}</Badge>
+                      {campaign.campaign_type === "sequence" && <Badge variant="outline" className="text-[10px]"><Layers className="h-2.5 w-2.5 mr-0.5" />Sequence</Badge>}
                     </div>
-                    <p className="text-xs text-muted-foreground">{tpl?.name || "No template"} → {seg?.name || "No segment"}</p>
+                    <p className="text-xs text-muted-foreground">{campaign.campaign_type === "sequence" ? "Multi-email" : tpl?.name || "No template"} → {seg?.name || "No segment"}</p>
                   </div>
                   {(campaign.stats as any)?.sent && <div className="text-right shrink-0"><p className="text-sm font-bold font-heading">{(campaign.stats as any).sent}</p><p className="text-[10px] text-muted-foreground">sent</p></div>}
                 </CardContent>
