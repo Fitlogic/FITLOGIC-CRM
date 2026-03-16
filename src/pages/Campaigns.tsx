@@ -309,7 +309,8 @@ const Campaigns_Page = () => {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { setEditingTemplate({ name: "", subject: "", preview_text: "", body_html: "", category: "welcome" }); setShowTemplateEditor(true); }}><FileText className="h-3.5 w-3.5 mr-1" /> New Template</Button>
           <Button variant="outline" size="sm" onClick={() => setShowAICreator(true)}><Sparkles className="h-3.5 w-3.5 mr-1" /> AI Creator</Button>
-          <Button size="sm" className="gradient-brand text-primary-foreground shadow-glow" onClick={() => { setEditingCampaign({ name: "", status: "draft", template_id: "", segment_id: "" }); setShowBuilder(true); }}><Plus className="h-3.5 w-3.5 mr-1" /> New Campaign</Button>
+          <Button variant="outline" size="sm" onClick={() => { setEditingCampaign({ name: "", status: "draft", campaign_type: "single", template_id: "", segment_id: "" }); setSequenceSteps([]); setShowBuilder(true); }}><Plus className="h-3.5 w-3.5 mr-1" /> New Campaign</Button>
+          <Button variant="outline" size="sm" onClick={() => { setEditingCampaign({ name: "", status: "draft", campaign_type: "sequence", segment_id: "" }); setSequenceSteps([{ id: `step-1`, step_number: 1, subject: "", body_html: "", delay_days: 0 }]); setShowBuilder(true); }}><Layers className="h-3.5 w-3.5 mr-1" /> New Sequence</Button>
         </div>
       </div>
 
