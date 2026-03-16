@@ -32,6 +32,7 @@ interface CampaignRow {
   id: string;
   name: string;
   status: string;
+  campaign_type: string;
   template_id: string | null;
   segment_id: string | null;
   scheduled_at: string | null;
@@ -39,6 +40,14 @@ interface CampaignRow {
   stats: any;
   created_at: string;
   updated_at: string;
+}
+
+interface SequenceStep {
+  id: string;
+  step_number: number;
+  subject: string;
+  body_html: string;
+  delay_days: number;
 }
 
 interface TemplateRow {
