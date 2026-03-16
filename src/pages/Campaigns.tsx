@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   Mail, Plus, Send, Clock, FileText, Eye, Pencil, Users, BarChart3,
   Search, Trash2, Copy, Pause, Play, ArrowLeft,
-  MousePointerClick, UserMinus, AlertTriangle, Check, X, Sparkles
+  MousePointerClick, UserMinus, AlertTriangle, Check, X, Sparkles, Layers
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
