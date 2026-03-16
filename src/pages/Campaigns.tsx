@@ -22,6 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { AICampaignCreator } from "@/components/AICampaignCreator";
+import { SequenceBuilder } from "@/components/SequenceBuilder";
 import {
   CAMPAIGN_STATUS_CONFIG, TEMPLATE_CATEGORY_CONFIG,
   type CampaignStatus, type CampaignStats,
