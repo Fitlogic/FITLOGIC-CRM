@@ -47,8 +47,57 @@ export type Database = {
         }
         Relationships: []
       }
+      campaign_sequences: {
+        Row: {
+          body_html_override: string | null
+          campaign_id: string
+          created_at: string
+          delay_days: number
+          id: string
+          step_number: number
+          subject_override: string | null
+          template_id: string | null
+        }
+        Insert: {
+          body_html_override?: string | null
+          campaign_id: string
+          created_at?: string
+          delay_days?: number
+          id?: string
+          step_number?: number
+          subject_override?: string | null
+          template_id?: string | null
+        }
+        Update: {
+          body_html_override?: string | null
+          campaign_id?: string
+          created_at?: string
+          delay_days?: number
+          id?: string
+          step_number?: number
+          subject_override?: string | null
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_sequences_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_sequences_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
+          campaign_type: string
           created_at: string
           id: string
           name: string
@@ -61,6 +110,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          campaign_type?: string
           created_at?: string
           id?: string
           name: string
@@ -73,6 +123,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          campaign_type?: string
           created_at?: string
           id?: string
           name?: string
@@ -383,6 +434,42 @@ export type Database = {
           tags?: string[] | null
           updated_at?: string
           zip_code?: string | null
+        }
+        Relationships: []
+      }
+      referrals: {
+        Row: {
+          converted_at: string | null
+          created_at: string
+          id: string
+          referral_code: string
+          referred_email: string | null
+          referred_name: string | null
+          referrer_email: string
+          referrer_name: string
+          status: string
+        }
+        Insert: {
+          converted_at?: string | null
+          created_at?: string
+          id?: string
+          referral_code: string
+          referred_email?: string | null
+          referred_name?: string | null
+          referrer_email: string
+          referrer_name: string
+          status?: string
+        }
+        Update: {
+          converted_at?: string | null
+          created_at?: string
+          id?: string
+          referral_code?: string
+          referred_email?: string | null
+          referred_name?: string | null
+          referrer_email?: string
+          referrer_name?: string
+          status?: string
         }
         Relationships: []
       }

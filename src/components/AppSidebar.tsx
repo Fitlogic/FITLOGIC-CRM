@@ -1,4 +1,4 @@
-import { MessageSquare, FileText, Mail, Users, Settings, BarChart3, ClipboardList } from "lucide-react";
+import { MessageSquare, FileText, Mail, Users, Settings, BarChart3, ClipboardList, Share2, ExternalLink } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import logo from "@/assets/fitlogic-logo.png";
@@ -20,12 +20,13 @@ import {
 const mainItems = [
   { title: "Inquiries", url: "/", icon: MessageSquare },
   { title: "FAQ Manager", url: "/faqs", icon: FileText },
-  { title: "Intake Forms", url: "/intake", icon: ClipboardList },
+  { title: "Forms", url: "/intake", icon: ClipboardList },
   { title: "Campaigns", url: "/campaigns", icon: Mail },
-  { title: "Patients", url: "/patients", icon: Users },
+  { title: "Customers", url: "/patients", icon: Users },
+  { title: "Referrals", url: "/referrals", icon: Share2 },
 ];
 
-const comingSoon = [
+const secondaryItems = [
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
@@ -46,7 +47,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div>
               <h2 className="font-heading text-sm font-bold text-sidebar-primary-foreground">FitLogic</h2>
-              <p className="text-[10px] text-sidebar-foreground/60">Patient Platform</p>
+              <p className="text-[10px] text-sidebar-foreground/60">Business Platform</p>
             </div>
           )}
         </div>
@@ -67,15 +68,24 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {/* External Marketing link */}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <a href="https://moilapp.com/marketing" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
+                    <ExternalLink className="h-4 w-4" />
+                    {!collapsed && <span>Marketing</span>}
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Coming Soon</SidebarGroupLabel>
+          <SidebarGroupLabel>System</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {comingSoon.map((item) => (
+              {secondaryItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <NavLink to={item.url} activeClassName="bg-sidebar-accent text-sidebar-primary">
@@ -93,7 +103,7 @@ export function AppSidebar() {
       <SidebarFooter className="p-4">
         {!collapsed && (
           <div className="rounded-lg bg-sidebar-accent/50 p-3">
-            <p className="text-[11px] text-sidebar-foreground/70">Phase 4 — Patient CRM</p>
+            <p className="text-[11px] text-sidebar-foreground/70">FitLogic Business Platform</p>
           </div>
         )}
       </SidebarFooter>

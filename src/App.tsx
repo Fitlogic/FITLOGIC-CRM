@@ -11,6 +11,7 @@ import Patients from "./pages/Patients";
 import Campaigns from "./pages/Campaigns";
 import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
+import Referrals from "./pages/Referrals";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/referrals" element={<Referrals />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Layout>

@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   Mail, Plus, Send, Clock, FileText, Eye, Pencil, Users, BarChart3,
   Search, Trash2, Copy, Pause, Play, ArrowLeft,
-  MousePointerClick, UserMinus, AlertTriangle, Check, X, Sparkles
+  MousePointerClick, UserMinus, AlertTriangle, Check, X, Sparkles, Layers
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -22,6 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { AICampaignCreator } from "@/components/AICampaignCreator";
+import { SequenceBuilder } from "@/components/SequenceBuilder";
 import {
   CAMPAIGN_STATUS_CONFIG, TEMPLATE_CATEGORY_CONFIG,
   type CampaignStatus, type CampaignStats,
@@ -31,6 +32,7 @@ interface CampaignRow {
   id: string;
   name: string;
   status: string;
+  campaign_type: string;
   template_id: string | null;
   segment_id: string | null;
   scheduled_at: string | null;
@@ -38,6 +40,14 @@ interface CampaignRow {
   stats: any;
   created_at: string;
   updated_at: string;
+}
+
+interface SequenceStep {
+  id: string;
+  step_number: number;
+  subject: string;
+  body_html: string;
+  delay_days: number;
 }
 
 interface TemplateRow {
@@ -67,6 +77,7 @@ const Campaigns_Page = () => {
   const [search, setSearch] = useState("");
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Partial<CampaignRow> | null>(null);
+  const [sequenceSteps, setSequenceSteps] = useState<SequenceStep[]>([]);
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Partial<TemplateRow> | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignRow | null>(null);
@@ -110,15 +121,35 @@ const Campaigns_Page = () => {
   /* Campaign mutations */
   const saveCampaignMut = useMutation({
     mutationFn: async (c: Partial<CampaignRow>) => {
+      const campaignType = c.campaign_type || "single";
       if (c.id) {
-        const { error } = await supabase.from("campaigns").update({ name: c.name, template_id: c.template_id, segment_id: c.segment_id, scheduled_at: c.scheduled_at }).eq("id", c.id);
+        const { error } = await supabase.from("campaigns").update({ name: c.name, template_id: c.template_id, segment_id: c.segment_id, scheduled_at: c.scheduled_at, campaign_type: campaignType }).eq("id", c.id);
         if (error) throw error;
+        // Update sequence steps if sequence campaign
+        if (campaignType === "sequence") {
+          await supabase.from("campaign_sequences").delete().eq("campaign_id", c.id);
+          if (sequenceSteps.length > 0) {
+            const { error: seqErr } = await supabase.from("campaign_sequences").insert(
+              sequenceSteps.map((s) => ({ campaign_id: c.id!, step_number: s.step_number, delay_days: s.delay_days, subject_override: s.subject, body_html_override: s.body_html }))
+            );
+            if (seqErr) throw seqErr;
+          }
+        }
       } else {
-        const { error } = await supabase.from("campaigns").insert({ name: c.name!, status: "draft", template_id: c.template_id!, segment_id: c.segment_id!, scheduled_at: c.scheduled_at });
+        const { data: newCampaign, error } = await supabase.from("campaigns").insert({
+          name: c.name!, status: "draft", template_id: campaignType === "single" ? c.template_id! : null, segment_id: c.segment_id!, scheduled_at: c.scheduled_at, campaign_type: campaignType,
+        }).select().single();
         if (error) throw error;
+        // Save sequence steps
+        if (campaignType === "sequence" && sequenceSteps.length > 0 && newCampaign) {
+          const { error: seqErr } = await supabase.from("campaign_sequences").insert(
+            sequenceSteps.map((s) => ({ campaign_id: newCampaign.id, step_number: s.step_number, delay_days: s.delay_days, subject_override: s.subject, body_html_override: s.body_html }))
+          );
+          if (seqErr) throw seqErr;
+        }
       }
     },
-    onSuccess: () => { invalidateAll(); setShowBuilder(false); setEditingCampaign(null); toast({ title: "Campaign saved" }); },
+    onSuccess: () => { invalidateAll(); setShowBuilder(false); setEditingCampaign(null); setSequenceSteps([]); toast({ title: "Campaign saved" }); },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
@@ -273,12 +304,13 @@ const Campaigns_Page = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl font-bold text-foreground">Email Campaigns</h1>
-          <p className="text-sm text-muted-foreground mt-1">Build, segment, schedule, and track email campaigns</p>
+          <p className="text-sm text-muted-foreground mt-1">Build single or multi-step email sequences, segment, and track</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { setEditingTemplate({ name: "", subject: "", preview_text: "", body_html: "", category: "welcome" }); setShowTemplateEditor(true); }}><FileText className="h-3.5 w-3.5 mr-1" /> New Template</Button>
           <Button variant="outline" size="sm" onClick={() => setShowAICreator(true)}><Sparkles className="h-3.5 w-3.5 mr-1" /> AI Creator</Button>
-          <Button size="sm" className="gradient-brand text-primary-foreground shadow-glow" onClick={() => { setEditingCampaign({ name: "", status: "draft", template_id: "", segment_id: "" }); setShowBuilder(true); }}><Plus className="h-3.5 w-3.5 mr-1" /> New Campaign</Button>
+          <Button variant="outline" size="sm" onClick={() => { setEditingCampaign({ name: "", status: "draft", campaign_type: "single", template_id: "", segment_id: "" }); setSequenceSteps([]); setShowBuilder(true); }}><Plus className="h-3.5 w-3.5 mr-1" /> New Campaign</Button>
+          <Button variant="outline" size="sm" onClick={() => { setEditingCampaign({ name: "", status: "draft", campaign_type: "sequence", segment_id: "" }); setSequenceSteps([{ id: `step-1`, step_number: 1, subject: "", body_html: "", delay_days: 0 }]); setShowBuilder(true); }}><Layers className="h-3.5 w-3.5 mr-1" /> New Sequence</Button>
         </div>
       </div>
 
@@ -321,8 +353,9 @@ const Campaigns_Page = () => {
                     <div className="flex items-center gap-2 mb-0.5">
                       <h3 className="font-heading font-semibold text-foreground truncate">{campaign.name}</h3>
                       <Badge className={`${cfg.bgColor} ${cfg.color} border-0 text-[10px]`}>{cfg.label}</Badge>
+                      {campaign.campaign_type === "sequence" && <Badge variant="outline" className="text-[10px]"><Layers className="h-2.5 w-2.5 mr-0.5" />Sequence</Badge>}
                     </div>
-                    <p className="text-xs text-muted-foreground">{tpl?.name || "No template"} → {seg?.name || "No segment"}</p>
+                    <p className="text-xs text-muted-foreground">{campaign.campaign_type === "sequence" ? "Multi-email" : tpl?.name || "No template"} → {seg?.name || "No segment"}</p>
                   </div>
                   {(campaign.stats as any)?.sent && <div className="text-right shrink-0"><p className="text-sm font-bold font-heading">{(campaign.stats as any).sent}</p><p className="text-[10px] text-muted-foreground">sent</p></div>}
                 </CardContent>
@@ -373,26 +406,43 @@ const Campaigns_Page = () => {
       </Tabs>
 
       {/* Campaign builder */}
-      <Dialog open={showBuilder} onOpenChange={v => { if (!v) { setShowBuilder(false); setEditingCampaign(null); } }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{editingCampaign?.id ? "Edit Campaign" : "New Campaign"}</DialogTitle></DialogHeader>
+      <Dialog open={showBuilder} onOpenChange={v => { if (!v) { setShowBuilder(false); setEditingCampaign(null); setSequenceSteps([]); } }}>
+        <DialogContent className={editingCampaign?.campaign_type === "sequence" ? "max-w-3xl max-h-[90vh] overflow-y-auto" : ""}>
+          <DialogHeader><DialogTitle>{editingCampaign?.id ? "Edit Campaign" : editingCampaign?.campaign_type === "sequence" ? "New Email Sequence" : "New Campaign"}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             <div><Label className="text-sm">Name</Label><Input value={editingCampaign?.name || ""} onChange={e => setEditingCampaign(p => ({ ...p, name: e.target.value }))} /></div>
-            <div><Label className="text-sm">Template</Label>
-              <Select value={editingCampaign?.template_id || ""} onValueChange={v => setEditingCampaign(p => ({ ...p, template_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
-                <SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+            <div><Label className="text-sm">Campaign Type</Label>
+              <Select value={editingCampaign?.campaign_type || "single"} onValueChange={v => setEditingCampaign(p => ({ ...p, campaign_type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single">Single Email</SelectItem>
+                  <SelectItem value="sequence">Multi-Email Sequence</SelectItem>
+                </SelectContent>
               </Select>
             </div>
+            {editingCampaign?.campaign_type === "single" && (
+              <div><Label className="text-sm">Template</Label>
+                <Select value={editingCampaign?.template_id || ""} onValueChange={v => setEditingCampaign(p => ({ ...p, template_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
+                  <SelectContent>{templates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
             <div><Label className="text-sm">Segment</Label>
               <Select value={editingCampaign?.segment_id || ""} onValueChange={v => setEditingCampaign(p => ({ ...p, segment_id: v }))}>
                 <SelectTrigger><SelectValue placeholder="Select segment" /></SelectTrigger>
                 <SelectContent>{segments.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.estimated_count})</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            {editingCampaign?.campaign_type === "sequence" && (
+              <>
+                <Separator />
+                <SequenceBuilder steps={sequenceSteps} onChange={setSequenceSteps} />
+              </>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowBuilder(false); setEditingCampaign(null); }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowBuilder(false); setEditingCampaign(null); setSequenceSteps([]); }}>Cancel</Button>
             <Button className="gradient-brand text-primary-foreground" onClick={() => editingCampaign && saveCampaignMut.mutate(editingCampaign)} disabled={saveCampaignMut.isPending}>Save</Button>
           </DialogFooter>
         </DialogContent>
