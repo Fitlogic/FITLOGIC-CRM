@@ -540,7 +540,7 @@ const Campaigns_Page = () => {
               <Separator />
 
               {/* Recipients */}
-              <CampaignRecipients recipients={recipients} onChange={setRecipients} />
+              <CampaignRecipients recipients={recipients} onChange={setRecipients} campaignId={editingCampaign?.id} />
 
               <Separator />
 
