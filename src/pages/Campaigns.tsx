@@ -497,7 +497,7 @@ const Campaigns_Page = () => {
               {editingCampaign?.id ? "Edit Campaign" : editingCampaign?.campaign_type === "sequence" ? "New Email Sequence" : "New Campaign"}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-2">
+          <ScrollArea className="overflow-y-auto pr-2">
             <div className="space-y-4 py-2">
               <div className="grid grid-cols-2 gap-3">
                 <div>
