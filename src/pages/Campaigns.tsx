@@ -491,7 +491,7 @@ const Campaigns_Page = () => {
 
       {/* Campaign builder dialog */}
       <Dialog open={showBuilder} onOpenChange={v => { if (!v) closeBuilder(); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] !grid grid-rows-[auto_1fr_auto] overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               {editingCampaign?.id ? "Edit Campaign" : editingCampaign?.campaign_type === "sequence" ? "New Email Sequence" : "New Campaign"}
