@@ -157,7 +157,7 @@ export default function Patients() {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
       setDeleteTarget(null);
       if (viewing?.id === deleteTarget?.id) setViewing(null);
-      toast({ title: "Patient deleted" });
+      toast({ title: "Contact deleted" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
