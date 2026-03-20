@@ -295,9 +295,9 @@ export default function Patients() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-foreground">Patient CRM</h1>
+          <h1 className="font-heading text-2xl font-bold text-foreground">Contacts</h1>
           <p className="text-sm text-muted-foreground">
-            {patients.length} patient{patients.length !== 1 ? "s" : ""} • HIPAA-ready architecture
+            {patients.length} contact{patients.length !== 1 ? "s" : ""} in your pipeline
           </p>
         </div>
         <Button onClick={() => { setEditing(null); setFormOpen(true); }} className="gap-1.5">
