@@ -1,181 +1,186 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { InquiryList, type InquiryRow } from "@/components/InquiryList";
-import { InquiryDetail } from "@/components/InquiryDetail";
-import { MessageSquare, Plus, Phone, PenLine } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import {
+  LayoutDashboard, Users, Mail, TrendingUp, ArrowRight,
+  ClipboardList, Share2, Target, DollarSign
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { toast } from "sonner";
-import type { InquiryCategory, InquirySource } from "@/lib/types";
-
-const CATEGORIES: { value: InquiryCategory; label: string }[] = [
-  { value: "Appointment_Scheduling", label: "Scheduling" },
-  { value: "Prescription_Lab_Requests", label: "Rx / Labs" },
-  { value: "Health_Questions", label: "Health" },
-  { value: "Billing_Insurance", label: "Billing" },
-  { value: "Urgent_Red_Flags", label: "Urgent" },
-  { value: "General_Info", label: "General" },
-];
+import { Badge } from "@/components/ui/badge";
 
 const Index = () => {
-  const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showNewInquiry, setShowNewInquiry] = useState(false);
-  const [newInquiry, setNewInquiry] = useState({
-    patientName: "",
-    patientEmail: "",
-    source: "phone" as InquirySource,
-    rawContent: "",
-    category: "General_Info" as InquiryCategory,
-  });
+  const navigate = useNavigate();
 
-  const { data: inquiries = [] } = useQuery({
-    queryKey: ["inquiries"],
+  const { data: contacts = [] } = useQuery({
+    queryKey: ["patients"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("inquiries")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data as InquiryRow[];
+      const { data } = await supabase.from("patients").select("id, first_name, last_name, email, status, created_at").order("created_at", { ascending: false });
+      return data || [];
     },
   });
 
-  const selectedInquiry = inquiries.find((i) => i.id === selectedId) || null;
-
-  const handleUpdate = (id: string, updates: Partial<InquiryRow>) => {
-    // Optimistic update
-    queryClient.setQueryData(["inquiries"], (old: InquiryRow[] | undefined) =>
-      old?.map((inq) => (inq.id === id ? { ...inq, ...updates } : inq)) || []
-    );
-  };
-
-  const createMutation = useMutation({
-    mutationFn: async (input: typeof newInquiry) => {
-      // Auto-create patient via DB function
-      const { data: patientId } = await supabase.rpc("find_or_create_patient", {
-        p_name: input.patientName,
-        p_email: input.patientEmail || null,
-      });
-
-      const { data, error } = await supabase.from("inquiries").insert({
-        patient_id: patientId,
-        patient_name: input.patientName,
-        patient_email: input.patientEmail || null,
-        source: input.source,
-        raw_content: input.rawContent,
-        category: input.category,
-        category_confidence: 1,
-        status: "pending",
-      }).select().single();
-      if (error) throw error;
-      return data;
+  const { data: campaigns = [] } = useQuery({
+    queryKey: ["campaigns"],
+    queryFn: async () => {
+      const { data } = await supabase.from("campaigns").select("id, name, status, sent_count, recipient_count, stats, created_at").order("created_at", { ascending: false });
+      return data || [];
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["inquiries"] });
-      queryClient.invalidateQueries({ queryKey: ["patients"] });
-      setSelectedId(data.id);
-      setShowNewInquiry(false);
-      setNewInquiry({ patientName: "", patientEmail: "", source: "phone", rawContent: "", category: "General_Info" });
-      toast.success("Inquiry created");
-    },
-    onError: (e) => toast.error(e.message),
   });
 
-  const handleCreateInquiry = () => {
-    if (!newInquiry.patientName.trim() || !newInquiry.rawContent.trim()) {
-      toast.error("Patient name and message are required");
-      return;
-    }
-    createMutation.mutate(newInquiry);
-  };
+  const { data: referrals = [] } = useQuery({
+    queryKey: ["referrals"],
+    queryFn: async () => {
+      const { data } = await supabase.from("referrals").select("id, status").order("created_at", { ascending: false });
+      return data || [];
+    },
+  });
+
+  const { data: submissions = [] } = useQuery({
+    queryKey: ["intake_submissions"],
+    queryFn: async () => {
+      const { data } = await supabase.from("intake_submissions").select("id, review_status, created_at").order("created_at", { ascending: false }).limit(50);
+      return data || [];
+    },
+  });
+
+  // Metrics
+  const activeContacts = contacts.filter(c => c.status === "active").length;
+  const activeCampaigns = campaigns.filter(c => c.status === "active" || c.status === "scheduled").length;
+  const totalSent = campaigns.reduce((s, c) => s + (c.sent_count || 0), 0);
+  const pendingLeads = submissions.filter(s => s.review_status === "pending").length;
+  const convertedReferrals = referrals.filter(r => r.status === "converted").length;
+  const recentContacts = contacts.slice(0, 5);
+  const recentCampaigns = campaigns.slice(0, 4);
+
+  const metrics = [
+    { label: "Active Contacts", value: activeContacts, icon: Users, color: "text-emerald-600", bg: "bg-emerald-500/10", action: () => navigate("/contacts") },
+    { label: "Live Campaigns", value: activeCampaigns, icon: Mail, color: "text-primary", bg: "bg-primary/10", action: () => navigate("/campaigns") },
+    { label: "Emails Sent", value: totalSent, icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-500/10", action: () => navigate("/campaigns") },
+    { label: "Pending Leads", value: pendingLeads, icon: Target, color: "text-amber-600", bg: "bg-amber-500/10", action: () => navigate("/forms") },
+  ];
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
-      <div className="w-[420px] border-r flex-shrink-0 bg-card flex flex-col">
-        <div className="p-3 border-b flex justify-end">
-          <Button size="sm" className="gradient-brand text-primary-foreground" onClick={() => setShowNewInquiry(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Log Inquiry
-          </Button>
-        </div>
-        <div className="flex-1 min-h-0">
-          <InquiryList inquiries={inquiries} selectedId={selectedId} onSelect={setSelectedId} />
-        </div>
+    <div className="space-y-6">
+      <div>
+        <h1 className="font-heading text-2xl font-bold text-foreground">Sales Pipeline</h1>
+        <p className="text-sm text-muted-foreground">Your sales engine at a glance</p>
       </div>
 
-      <div className="flex-1 min-w-0">
-        {selectedInquiry ? (
-          <InquiryDetail inquiry={selectedInquiry} onUpdate={handleUpdate} />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <div className="rounded-2xl gradient-brand p-5 mb-4 shadow-glow">
-              <MessageSquare className="h-8 w-8 text-primary-foreground" />
-            </div>
-            <h3 className="font-heading text-lg font-semibold text-foreground mb-1">Inquiry Dashboard</h3>
-            <p className="text-sm">Select an inquiry to view details and respond</p>
-          </div>
-        )}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {metrics.map((m) => (
+          <Card key={m.label} className="cursor-pointer hover:shadow-md transition-shadow" onClick={m.action}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className={`rounded-lg p-2 ${m.bg}`}>
+                  <m.icon className={`h-4 w-4 ${m.color}`} />
+                </div>
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+              <p className="text-2xl font-bold font-heading text-foreground">{m.value}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{m.label}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      <Dialog open={showNewInquiry} onOpenChange={setShowNewInquiry}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <PenLine className="h-4 w-4 text-primary" /> Log New Inquiry
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Patient Name *</Label>
-              <Input value={newInquiry.patientName} onChange={(e) => setNewInquiry((p) => ({ ...p, patientName: e.target.value }))} placeholder="e.g. Jane Smith" className="mt-1" />
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Recent Contacts */}
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-heading">Recent Contacts</CardTitle>
+              <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate("/contacts")}>
+                View all <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
             </div>
-            <div>
-              <Label>Email (optional)</Label>
-              <Input value={newInquiry.patientEmail} onChange={(e) => setNewInquiry((p) => ({ ...p, patientEmail: e.target.value }))} placeholder="patient@email.com" className="mt-1" />
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {recentContacts.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">No contacts yet</p>
+            ) : (
+              recentContacts.map((c) => (
+                <div key={c.id} className="flex items-center justify-between py-1.5 border-b last:border-0 border-border/50">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{c.first_name} {c.last_name}</p>
+                    <p className="text-xs text-muted-foreground">{c.email || "No email"}</p>
+                  </div>
+                  <Badge variant="outline" className="text-[10px]">{c.status}</Badge>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Campaign Activity */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-heading">Campaign Activity</CardTitle>
+              <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate("/campaigns")}>
+                View all <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Source</Label>
-                <Select value={newInquiry.source} onValueChange={(v) => setNewInquiry((p) => ({ ...p, source: v as InquirySource }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="phone"><span className="flex items-center gap-1.5"><Phone className="h-3 w-3" /> Phone</span></SelectItem>
-                    <SelectItem value="manual"><span className="flex items-center gap-1.5"><PenLine className="h-3 w-3" /> Walk-in</span></SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
-                    <SelectItem value="portal">Portal</SelectItem>
-                  </SelectContent>
-                </Select>
+          </CardHeader>
+          <CardContent>
+            {recentCampaigns.length === 0 ? (
+              <div className="text-center py-8">
+                <Mail className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground mb-3">No campaigns yet</p>
+                <Button size="sm" onClick={() => navigate("/campaigns")}>Create First Campaign</Button>
               </div>
-              <div>
-                <Label>Category</Label>
-                <Select value={newInquiry.category} onValueChange={(v) => setNewInquiry((p) => ({ ...p, category: v as InquiryCategory }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            ) : (
+              <div className="space-y-3">
+                {recentCampaigns.map((c) => {
+                  const stats = c.stats as Record<string, number> | null;
+                  const openRate = stats?.opened && c.sent_count ? Math.round((stats.opened / c.sent_count) * 100) : 0;
+                  return (
+                    <div key={c.id} className="flex items-center gap-4 p-3 rounded-lg border border-border/50 hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => navigate("/campaigns")}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{c.name}</p>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                          <span>{c.sent_count || 0} sent</span>
+                          <span>{c.recipient_count || 0} recipients</span>
+                          {openRate > 0 && <span className="text-emerald-600">{openRate}% opened</span>}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className={`text-[10px] ${
+                        c.status === "active" ? "border-emerald-200 text-emerald-700 bg-emerald-500/10" :
+                        c.status === "scheduled" ? "border-blue-200 text-blue-700 bg-blue-500/10" :
+                        c.status === "draft" ? "border-border text-muted-foreground" :
+                        "border-border text-muted-foreground"
+                      }`}>{c.status}</Badge>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-            <div>
-              <Label>Message / Notes *</Label>
-              <Textarea value={newInquiry.rawContent} onChange={(e) => setNewInquiry((p) => ({ ...p, rawContent: e.target.value }))} placeholder="Describe the patient's inquiry..." className="mt-1 min-h-[100px]" />
-            </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick Actions */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-heading">Quick Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "New Campaign", icon: Mail, path: "/campaigns", color: "text-primary" },
+              { label: "Add Contact", icon: Users, path: "/contacts", color: "text-emerald-600" },
+              { label: "Lead Forms", icon: ClipboardList, path: "/forms", color: "text-amber-600" },
+              { label: "Referrals", icon: Share2, path: "/referrals", color: "text-blue-600" },
+            ].map((a) => (
+              <Button key={a.label} variant="outline" className="h-auto py-4 flex-col gap-2" onClick={() => navigate(a.path)}>
+                <a.icon className={`h-5 w-5 ${a.color}`} />
+                <span className="text-xs">{a.label}</span>
+              </Button>
+            ))}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewInquiry(false)}>Cancel</Button>
-            <Button className="gradient-brand text-primary-foreground" onClick={handleCreateInquiry} disabled={createMutation.isPending}>
-              {createMutation.isPending ? "Creating..." : "Create Inquiry"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </CardContent>
+      </Card>
     </div>
   );
 };

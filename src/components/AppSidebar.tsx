@@ -1,4 +1,4 @@
-import { MessageSquare, FileText, Mail, Users, Settings, BarChart3, ClipboardList, Share2, ExternalLink } from "lucide-react";
+import { LayoutDashboard, Mail, Users, ClipboardList, FileText, Share2, Settings, BarChart3, ExternalLink } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import logo from "@/assets/fitlogic-logo.png";
@@ -18,11 +18,11 @@ import {
 } from "@/components/ui/sidebar";
 
 const mainItems = [
-  { title: "Inquiries", url: "/", icon: MessageSquare },
-  { title: "FAQ Manager", url: "/faqs", icon: FileText },
-  { title: "Forms", url: "/intake", icon: ClipboardList },
+  { title: "Pipeline", url: "/", icon: LayoutDashboard },
   { title: "Campaigns", url: "/campaigns", icon: Mail },
-  { title: "Customers", url: "/patients", icon: Users },
+  { title: "Contacts", url: "/contacts", icon: Users },
+  { title: "Lead Forms", url: "/forms", icon: ClipboardList },
+  { title: "FAQs", url: "/faqs", icon: FileText },
   { title: "Referrals", url: "/referrals", icon: Share2 },
 ];
 
@@ -47,7 +47,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div>
               <h2 className="font-heading text-sm font-bold text-sidebar-primary-foreground">FitLogic</h2>
-              <p className="text-[10px] text-sidebar-foreground/60">Business Platform</p>
+              <p className="text-[10px] text-sidebar-foreground/60">Sales Engine</p>
             </div>
           )}
         </div>
@@ -55,7 +55,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Dashboard</SidebarGroupLabel>
+          <SidebarGroupLabel>Sales</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {mainItems.map((item) => (
@@ -68,7 +68,6 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {/* External Marketing link */}
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
                   <a href="https://moilapp.com/marketing" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
@@ -103,7 +102,7 @@ export function AppSidebar() {
       <SidebarFooter className="p-4">
         {!collapsed && (
           <div className="rounded-lg bg-sidebar-accent/50 p-3">
-            <p className="text-[11px] text-sidebar-foreground/70">FitLogic Business Platform</p>
+            <p className="text-[11px] text-sidebar-foreground/70">FitLogic Sales Engine</p>
           </div>
         )}
       </SidebarFooter>

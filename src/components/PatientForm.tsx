@@ -65,14 +65,14 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="last_name">Last Name *</Label>
-          <Input id="last_name" {...register("last_name", { required: true })} placeholder="Doe" />
+          <Input id="last_name" {...register("last_name", { required: true })} placeholder="Smith" />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" {...register("email")} placeholder="jane@example.com" />
+          <Input id="email" type="email" {...register("email")} placeholder="jane@company.com" />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="phone">Phone</Label>
@@ -82,17 +82,19 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="date_of_birth">Date of Birth</Label>
-          <Input id="date_of_birth" type="date" {...register("date_of_birth")} />
+          <Label htmlFor="insurance_provider">Company</Label>
+          <Input id="insurance_provider" {...register("insurance_provider")} placeholder="Acme Corp" />
         </div>
         <div className="space-y-1.5">
-          <Label>Gender</Label>
+          <Label>Lead Source</Label>
           <Select value={gender} onValueChange={(v) => setValue("gender", v)}>
             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="female">Female</SelectItem>
-              <SelectItem value="male">Male</SelectItem>
-              <SelectItem value="non-binary">Non-binary</SelectItem>
+              <SelectItem value="referral">Referral</SelectItem>
+              <SelectItem value="cold-outreach">Cold Outreach</SelectItem>
+              <SelectItem value="inbound">Inbound</SelectItem>
+              <SelectItem value="event">Event</SelectItem>
+              <SelectItem value="social">Social Media</SelectItem>
               <SelectItem value="other">Other</SelectItem>
             </SelectContent>
           </Select>
@@ -121,41 +123,36 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="insurance_provider">Insurance Provider</Label>
-          <Input id="insurance_provider" {...register("insurance_provider")} placeholder="Blue Cross" />
+          <Label>Status</Label>
+          <Select value={status} onValueChange={(v) => setValue("status", v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active Lead</SelectItem>
+              <SelectItem value="inactive">Cold</SelectItem>
+              <SelectItem value="archived">Closed</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="insurance_id">Insurance ID</Label>
-          <Input id="insurance_id" {...register("insurance_id")} placeholder="BCX-12345" />
+          <Label htmlFor="insurance_id">Deal Value</Label>
+          <Input id="insurance_id" {...register("insurance_id")} placeholder="$5,000" />
         </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label>Status</Label>
-        <Select value={status} onValueChange={(v) => setValue("status", v)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="archived">Archived</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="tags">Tags</Label>
-        <Input id="tags" {...register("tags")} placeholder="vip, new-patient, follow-up (comma-separated)" />
+        <Input id="tags" {...register("tags")} placeholder="vip, hot-lead, follow-up (comma-separated)" />
       </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="notes">Notes</Label>
-        <Textarea id="notes" {...register("notes")} placeholder="Internal notes about this patient..." rows={3} />
+        <Textarea id="notes" {...register("notes")} placeholder="Meeting notes, deal details, next steps..." rows={3} />
       </div>
 
       <DialogFooter className="pt-4">
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Saving..." : defaultValues?.first_name ? "Update Patient" : "Add Patient"}
+          {isSubmitting ? "Saving..." : defaultValues?.first_name ? "Update Contact" : "Add Contact"}
         </Button>
       </DialogFooter>
     </form>
