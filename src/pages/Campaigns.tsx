@@ -5,6 +5,7 @@ import {
   Mail, Plus, Send, Clock, FileText, Eye, Pencil, Users, BarChart3,
   Search, Trash2, Copy, MousePointerClick, Sparkles, Layers
 } from "lucide-react";
+import { EmailPreview } from "@/components/EmailPreview";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
