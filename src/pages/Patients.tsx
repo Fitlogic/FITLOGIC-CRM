@@ -328,9 +328,9 @@ export default function Patients() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Patient</TableHead>
                   <TableHead>Contact</TableHead>
-                  <TableHead>Insurance</TableHead>
+                  <TableHead>Email / Phone</TableHead>
+                  <TableHead>Company</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
