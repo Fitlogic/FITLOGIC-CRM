@@ -216,7 +216,7 @@ export default function Patients() {
                 <Phone className="h-4 w-4" /> {p.phone || "—"}
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Calendar className="h-4 w-4" /> DOB: {formatDate(p.date_of_birth)}
+                <Calendar className="h-4 w-4" /> Lead Source: {p.gender || "—"}
               </div>
               <p className="text-muted-foreground">
                 {[p.address, p.city, p.state, p.zip_code].filter(Boolean).join(", ") || "No address on file"}
