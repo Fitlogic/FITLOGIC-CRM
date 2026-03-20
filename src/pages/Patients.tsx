@@ -270,9 +270,9 @@ export default function Patients() {
         <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete Patient</AlertDialogTitle>
+              <AlertDialogTitle>Delete Contact</AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} and log the action in the audit trail.
+                This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} from your pipeline.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
