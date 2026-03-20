@@ -318,11 +318,11 @@ export default function Patients() {
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading patients…</div>
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading contacts…</div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
               <Users className="h-8 w-8 mb-2 opacity-40" />
-              <p className="text-sm">{search ? "No patients match your search" : "No patients yet — add your first one"}</p>
+              <p className="text-sm">{search ? "No contacts match your search" : "No contacts yet — add your first one"}</p>
             </div>
           ) : (
             <Table>
