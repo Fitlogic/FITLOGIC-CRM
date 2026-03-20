@@ -109,7 +109,7 @@ export default function Patients() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
       setFormOpen(false);
-      toast({ title: "Patient added" });
+      toast({ title: "Contact added" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -143,7 +143,7 @@ export default function Patients() {
       }
       setEditing(null);
       setFormOpen(false);
-      toast({ title: "Patient updated" });
+      toast({ title: "Contact updated" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -157,7 +157,7 @@ export default function Patients() {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
       setDeleteTarget(null);
       if (viewing?.id === deleteTarget?.id) setViewing(null);
-      toast({ title: "Patient deleted" });
+      toast({ title: "Contact deleted" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -178,7 +178,7 @@ export default function Patients() {
     return (
       <div className="space-y-6">
         <Button variant="ghost" size="sm" onClick={() => setViewing(null)} className="gap-1">
-          <ChevronLeft className="h-4 w-4" /> Back to patients
+          <ChevronLeft className="h-4 w-4" /> Back to contacts
         </Button>
 
         <div className="flex items-start justify-between">
@@ -216,7 +216,7 @@ export default function Patients() {
                 <Phone className="h-4 w-4" /> {p.phone || "—"}
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Calendar className="h-4 w-4" /> DOB: {formatDate(p.date_of_birth)}
+                <Calendar className="h-4 w-4" /> Lead Source: {p.gender || "—"}
               </div>
               <p className="text-muted-foreground">
                 {[p.address, p.city, p.state, p.zip_code].filter(Boolean).join(", ") || "No address on file"}
@@ -225,12 +225,12 @@ export default function Patients() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-base">Insurance</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">Company & Deal</CardTitle></CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Shield className="h-4 w-4" /> {p.insurance_provider || "No provider"}
+                <Shield className="h-4 w-4" /> {p.insurance_provider || "No company"}
               </div>
-              <p className="text-muted-foreground">ID: {p.insurance_id || "—"}</p>
+              <p className="text-muted-foreground">Deal Value: {p.insurance_id || "—"}</p>
             </CardContent>
           </Card>
 
@@ -270,9 +270,9 @@ export default function Patients() {
         <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete Patient</AlertDialogTitle>
+              <AlertDialogTitle>Delete Contact</AlertDialogTitle>
               <AlertDialogDescription>
-                This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} and log the action in the audit trail.
+                This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} from your pipeline.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -295,20 +295,20 @@ export default function Patients() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-foreground">Patient CRM</h1>
+          <h1 className="font-heading text-2xl font-bold text-foreground">Contacts</h1>
           <p className="text-sm text-muted-foreground">
-            {patients.length} patient{patients.length !== 1 ? "s" : ""} • HIPAA-ready architecture
+            {patients.length} contact{patients.length !== 1 ? "s" : ""} in your pipeline
           </p>
         </div>
         <Button onClick={() => { setEditing(null); setFormOpen(true); }} className="gap-1.5">
-          <Plus className="h-4 w-4" /> Add Patient
+          <Plus className="h-4 w-4" /> Add Contact
         </Button>
       </div>
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search patients..."
+          placeholder="Search contacts..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9"
@@ -318,19 +318,19 @@ export default function Patients() {
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading patients…</div>
+            <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading contacts…</div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
               <Users className="h-8 w-8 mb-2 opacity-40" />
-              <p className="text-sm">{search ? "No patients match your search" : "No patients yet — add your first one"}</p>
+              <p className="text-sm">{search ? "No contacts match your search" : "No contacts yet — add your first one"}</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Patient</TableHead>
                   <TableHead>Contact</TableHead>
-                  <TableHead>Insurance</TableHead>
+                  <TableHead>Email / Phone</TableHead>
+                  <TableHead>Company</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
@@ -358,6 +358,7 @@ export default function Patients() {
                     <TableCell className="text-sm text-muted-foreground">
                       {p.insurance_provider || "—"}
                     </TableCell>
+
                     <TableCell>
                       <Badge variant="outline" className={statusColor[p.status]}>{p.status}</Badge>
                     </TableCell>
@@ -393,9 +394,9 @@ export default function Patients() {
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditing(null); } }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Patient" : "Add New Patient"}</DialogTitle>
+            <DialogTitle>{editing ? "Edit Contact" : "Add New Contact"}</DialogTitle>
             <DialogDescription>
-              {editing ? "Update patient information below." : "Enter patient details. All data is audit-logged."}
+              {editing ? "Update contact information below." : "Enter contact details to add to your pipeline."}
             </DialogDescription>
           </DialogHeader>
           <PatientForm
@@ -431,9 +432,9 @@ export default function Patients() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Patient</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} and log the action in the audit trail.
+              <AlertDialogTitle>Delete Contact</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} from your pipeline.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
