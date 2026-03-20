@@ -358,6 +358,7 @@ export default function Patients() {
                     <TableCell className="text-sm text-muted-foreground">
                       {p.insurance_provider || "—"}
                     </TableCell>
+
                     <TableCell>
                       <Badge variant="outline" className={statusColor[p.status]}>{p.status}</Badge>
                     </TableCell>
