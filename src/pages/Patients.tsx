@@ -225,12 +225,12 @@ export default function Patients() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-base">Insurance</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-base">Company & Deal</CardTitle></CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Shield className="h-4 w-4" /> {p.insurance_provider || "No provider"}
+                <Shield className="h-4 w-4" /> {p.insurance_provider || "No company"}
               </div>
-              <p className="text-muted-foreground">ID: {p.insurance_id || "—"}</p>
+              <p className="text-muted-foreground">Deal Value: {p.insurance_id || "—"}</p>
             </CardContent>
           </Card>
 
