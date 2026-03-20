@@ -394,9 +394,9 @@ export default function Patients() {
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditing(null); } }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Patient" : "Add New Patient"}</DialogTitle>
+            <DialogTitle>{editing ? "Edit Contact" : "Add New Contact"}</DialogTitle>
             <DialogDescription>
-              {editing ? "Update patient information below." : "Enter patient details. All data is audit-logged."}
+              {editing ? "Update contact information below." : "Enter contact details to add to your pipeline."}
             </DialogDescription>
           </DialogHeader>
           <PatientForm
