@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { Sparkles, Loader2, Eye, Check, Lightbulb, Clock, Users, FileText } from "lucide-react";
+import { Sparkles, Loader2, Eye, EyeOff, Check, Lightbulb, Clock, Users, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { EmailPreview } from "@/components/EmailPreview";
 import { supabase } from "@/integrations/supabase/client";
 import type { Segment } from "@/lib/campaign-data";
 
@@ -28,10 +31,10 @@ interface AICampaignCreatorProps {
 }
 
 const EXAMPLE_PROMPTS = [
-  "Re-engage patients who haven't visited in 6+ months with a seasonal wellness check-in",
-  "Welcome new patients with an intro to our functional medicine approach",
-  "Promote our new hormone health workshop next month",
-  "Send a follow-up to patients who completed intake forms this week",
+  "Re-engage leads who haven't responded in 2 weeks with a value offer",
+  "Welcome new customers with an intro to our services and a booking CTA",
+  "Promote our upcoming workshop to past attendees",
+  "Send a follow-up to contacts who completed a form this week",
 ];
 
 export function AICampaignCreator({ open, onOpenChange, segments, onAccept }: AICampaignCreatorProps) {
@@ -39,7 +42,8 @@ export function AICampaignCreator({ open, onOpenChange, segments, onAccept }: AI
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<AICampaignResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -77,19 +81,20 @@ export function AICampaignCreator({ open, onOpenChange, segments, onAccept }: AI
     setPrompt("");
     setResult(null);
     setError(null);
-    setShowPreview(false);
+    setShowPreview(true);
+    setIsEditing(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleReset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
             AI Campaign Creator
           </DialogTitle>
           <DialogDescription>
-            Describe your campaign goal and AI will generate everything — subject, copy, audience, and timing.
+            Describe your campaign goal and AI will generate everything — then preview and edit before accepting.
           </DialogDescription>
         </DialogHeader>
 
@@ -97,7 +102,7 @@ export function AICampaignCreator({ open, onOpenChange, segments, onAccept }: AI
           {!result ? (
             <div className="space-y-4 py-2">
               <Textarea
-                placeholder="Describe your campaign goal... e.g., 'Re-engage patients who haven't visited in 6 months with a wellness check-in offer'"
+                placeholder="Describe your campaign goal... e.g., 'Re-engage leads who haven't responded in 2 weeks with a special offer'"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 className="min-h-[100px] resize-none"
@@ -133,38 +138,67 @@ export function AICampaignCreator({ open, onOpenChange, segments, onAccept }: AI
               {/* Result header */}
               <div className="rounded-lg border bg-primary/5 p-4">
                 <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h3 className="font-heading font-semibold text-foreground">{result.campaignName}</h3>
+                  <div className="flex-1">
+                    {isEditing ? (
+                      <Input
+                        value={result.campaignName}
+                        onChange={e => setResult({ ...result, campaignName: e.target.value })}
+                        className="font-heading font-semibold border-0 bg-transparent px-0 h-auto text-base focus-visible:ring-0"
+                      />
+                    ) : (
+                      <h3 className="font-heading font-semibold text-foreground">{result.campaignName}</h3>
+                    )}
                     <Badge variant="outline" className="mt-1 text-[10px]">{result.category}</Badge>
                   </div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Check className="h-3.5 w-3.5 text-primary" />
-                    AI Generated
-                  </div>
+                  <Badge className="bg-primary/10 text-primary border-0 text-[10px]">
+                    <Sparkles className="h-3 w-3 mr-0.5" />AI Generated
+                  </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground italic mt-2">{result.rationale}</p>
               </div>
 
-              {/* Email preview */}
+              {/* Email content */}
               <div className="space-y-2">
-                <h4 className="text-sm font-medium text-foreground">Email Content</h4>
-                <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
-                  <p className="text-xs">
-                    <span className="text-muted-foreground">Subject:</span>{" "}
-                    <span className="font-medium">{result.subject}</span>
-                  </p>
-                  <p className="text-xs">
-                    <span className="text-muted-foreground">Preview:</span>{" "}
-                    <span className="text-muted-foreground">{result.previewText}</span>
-                  </p>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-foreground">Email Content</h4>
+                  <div className="flex gap-1">
+                    <Button variant={showPreview ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs"
+                      onClick={() => { setShowPreview(true); setIsEditing(false); }}>
+                      <Eye className="h-3 w-3 mr-1" />Preview
+                    </Button>
+                    <Button variant={isEditing ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs"
+                      onClick={() => { setIsEditing(true); setShowPreview(false); }}>
+                      <Pencil className="h-3 w-3 mr-1" />Edit
+                    </Button>
+                  </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setShowPreview(!showPreview)}>
-                  <Eye className="h-3 w-3 mr-1" />
-                  {showPreview ? "Hide" : "Show"} Email Body
-                </Button>
-                {showPreview && (
-                  <div className="rounded-lg border bg-card p-4 text-sm" dangerouslySetInnerHTML={{ __html: result.bodyHtml }} />
-                )}
+
+                {isEditing ? (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Subject Line</Label>
+                      <Input value={result.subject} onChange={e => setResult({ ...result, subject: e.target.value })} className="mt-1 text-sm" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Preview Text</Label>
+                      <Input value={result.previewText} onChange={e => setResult({ ...result, previewText: e.target.value })} className="mt-1 text-sm" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Email Body (HTML)</Label>
+                      <Textarea
+                        value={result.bodyHtml}
+                        onChange={e => setResult({ ...result, bodyHtml: e.target.value })}
+                        className="mt-1 text-sm font-mono min-h-[200px]"
+                      />
+                    </div>
+                  </div>
+                ) : showPreview ? (
+                  <EmailPreview
+                    html={result.bodyHtml}
+                    subject={result.subject}
+                    previewText={result.previewText}
+                  />
+                ) : null}
               </div>
 
               <Separator />
@@ -193,35 +227,24 @@ export function AICampaignCreator({ open, onOpenChange, segments, onAccept }: AI
         <DialogFooter className="mt-2">
           {!result ? (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isGenerating}>
-                Cancel
-              </Button>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isGenerating}>Cancel</Button>
               <Button
                 className="gradient-brand text-primary-foreground"
                 onClick={handleGenerate}
                 disabled={!prompt.trim() || isGenerating}
               >
                 {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    Generating…
-                  </>
+                  <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Generating…</>
                 ) : (
-                  <>
-                    <Sparkles className="h-4 w-4 mr-1.5" />
-                    Generate Campaign
-                  </>
+                  <><Sparkles className="h-4 w-4 mr-1.5" />Generate Campaign</>
                 )}
               </Button>
             </>
           ) : (
             <>
-              <Button variant="outline" onClick={handleReset}>
-                Start Over
-              </Button>
+              <Button variant="outline" onClick={handleReset}>Start Over</Button>
               <Button className="gradient-brand text-primary-foreground" onClick={handleAccept}>
-                <Check className="h-4 w-4 mr-1.5" />
-                Use This Campaign
+                <Check className="h-4 w-4 mr-1.5" />Use This Campaign
               </Button>
             </>
           )}

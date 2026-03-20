@@ -3,17 +3,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft, Pencil, Clock, Pause, Play, Send, Check, Eye, Users,
-  MousePointerClick, AlertTriangle, UserMinus, BarChart3, Mail, Layers, Trash2
+  MousePointerClick, AlertTriangle, UserMinus, BarChart3, Mail, Layers, Trash2,
+  ChevronDown, ChevronUp
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { EmailPreview } from "@/components/EmailPreview";
 import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus, type CampaignStats } from "@/lib/types";
 
 interface CampaignRow {
@@ -47,15 +48,14 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const cfg = CAMPAIGN_STATUS_CONFIG[campaign.status as CampaignStatus] || CAMPAIGN_STATUS_CONFIG.draft;
+  const [expandedSequence, setExpandedSequence] = useState<string | null>(null);
+  const [activeDetailTab, setActiveDetailTab] = useState("overview");
 
   const { data: recipients = [] } = useQuery({
     queryKey: ["campaign-recipients", campaign.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("campaign_recipients")
-        .select("*")
-        .eq("campaign_id", campaign.id)
-        .order("created_at");
+        .from("campaign_recipients").select("*").eq("campaign_id", campaign.id).order("created_at");
       if (error) throw error;
       return data;
     },
@@ -66,13 +66,22 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
     queryFn: async () => {
       if (campaign.campaign_type !== "sequence") return [];
       const { data, error } = await supabase
-        .from("campaign_sequences")
-        .select("*")
-        .eq("campaign_id", campaign.id)
-        .order("step_number");
+        .from("campaign_sequences").select("*").eq("campaign_id", campaign.id).order("step_number");
       if (error) throw error;
       return data;
     },
+  });
+
+  const { data: template } = useQuery({
+    queryKey: ["campaign-template", campaign.template_id],
+    queryFn: async () => {
+      if (!campaign.template_id) return null;
+      const { data, error } = await supabase
+        .from("email_templates").select("*").eq("id", campaign.template_id).single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!campaign.template_id,
   });
 
   const updateStatusMut = useMutation({
@@ -91,19 +100,24 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
     toast({ title: "Campaign scheduled" });
   };
 
-  const stats = campaign.stats as CampaignStats | null;
   const sentRecipients = recipients.filter(r => r.status !== "pending");
   const pendingRecipients = recipients.filter(r => r.status === "pending");
+  const totalDays = sequences.reduce((sum: number, s: any) => sum + (s.delay_days || 0), 0);
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={onBack}><ArrowLeft className="h-4 w-4" /></Button>
         <div className="flex-1">
           <h1 className="font-heading text-xl font-bold text-foreground">{campaign.name}</h1>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge className={`${cfg.bgColor} ${cfg.color} border-0 text-xs`}>{cfg.label}</Badge>
-            {campaign.campaign_type === "sequence" && <Badge variant="outline" className="text-[10px]"><Layers className="h-2.5 w-2.5 mr-0.5" />Sequence • {sequences.length} emails</Badge>}
+            {campaign.campaign_type === "sequence" && (
+              <Badge variant="outline" className="text-[10px]">
+                <Layers className="h-2.5 w-2.5 mr-0.5" />Sequence • {sequences.length} emails • {totalDays} days
+              </Badge>
+            )}
             <span className="text-xs text-muted-foreground">{recipients.length} recipients</span>
             {campaign.auto_schedule && (
               <Badge variant="outline" className="text-[10px] text-primary">
@@ -149,60 +163,112 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
         </div>
       )}
 
-      {/* Sequence steps preview */}
-      {sequences.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Layers className="h-4 w-4 text-primary" />Email Sequence ({sequences.length} steps)</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {sequences.map((s: any, i: number) => (
-              <div key={s.id} className="flex items-center gap-3 text-xs">
-                <Badge variant="outline" className="text-[10px] font-mono shrink-0">Step {s.step_number}</Badge>
-                {i > 0 && <span className="text-muted-foreground">+{s.delay_days}d</span>}
-                <span className="font-medium truncate">{s.subject_override || "No subject"}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      {/* Tabs for content / recipients */}
+      <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab}>
+        <TabsList>
+          <TabsTrigger value="overview" className="text-xs">
+            <Mail className="h-3 w-3 mr-1" />Email Content
+          </TabsTrigger>
+          <TabsTrigger value="recipients" className="text-xs">
+            <Users className="h-3 w-3 mr-1" />Recipients ({recipients.length})
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Recipient tracking table */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2"><Mail className="h-4 w-4 text-primary" />Recipient Tracking</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recipients.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-4">No recipients added yet. Edit this campaign to add contacts.</p>
-          ) : (
-            <ScrollArea className="max-h-[300px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-xs">Name</TableHead>
-                    <TableHead className="text-xs">Email</TableHead>
-                    <TableHead className="text-xs">Source</TableHead>
-                    <TableHead className="text-xs">Status</TableHead>
-                    <TableHead className="text-xs">Sent</TableHead>
-                    {campaign.campaign_type === "sequence" && <TableHead className="text-xs">Step</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recipients.map((r: any) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="text-xs font-medium">{r.name || "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.email}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-[9px]">{r.source === "customer" ? "CRM" : r.source === "csv_import" ? "CSV" : "Manual"}</Badge></TableCell>
-                      <TableCell><Badge className={`${RECIPIENT_STATUS_COLORS[r.status] || "bg-muted"} border-0 text-[10px]`}>{r.status}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.sent_at ? new Date(r.sent_at).toLocaleDateString() : "—"}</TableCell>
-                      {campaign.campaign_type === "sequence" && <TableCell className="text-xs">{r.current_step || 0}/{sequences.length}</TableCell>}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+        {/* Email content tab */}
+        <TabsContent value="overview" className="mt-4 space-y-4">
+          {/* Single campaign - show template */}
+          {campaign.campaign_type === "single" && template && (
+            <EmailPreview
+              html={template.body_html || ""}
+              subject={template.subject}
+              previewText={template.preview_text || undefined}
+            />
           )}
-        </CardContent>
-      </Card>
+          {campaign.campaign_type === "single" && !template && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                No template linked. Edit this campaign to add one.
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Sequence - show all emails */}
+          {campaign.campaign_type === "sequence" && sequences.length > 0 && (
+            <div className="space-y-3">
+              {sequences.map((s: any, i: number) => {
+                const isOpen = expandedSequence === s.id;
+                return (
+                  <Card key={s.id} className={`transition-colors ${isOpen ? "border-primary/40" : ""}`}>
+                    <button
+                      className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/30 transition-colors"
+                      onClick={() => setExpandedSequence(isOpen ? null : s.id)}
+                    >
+                      <Badge variant="outline" className="text-[10px] font-mono shrink-0">Step {s.step_number}</Badge>
+                      {i > 0 && <span className="text-[10px] text-muted-foreground">+{s.delay_days}d</span>}
+                      <span className="text-sm font-medium truncate flex-1">{s.subject_override || "No subject"}</span>
+                      {isOpen ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                    </button>
+                    {isOpen && (
+                      <div className="px-4 pb-4 border-t">
+                        <EmailPreview
+                          html={s.body_html_override || ""}
+                          subject={s.subject_override || ""}
+                          className="mt-3"
+                        />
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+          {campaign.campaign_type === "sequence" && sequences.length === 0 && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                No sequence steps yet. Edit this campaign to add emails.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* Recipients tab */}
+        <TabsContent value="recipients" className="mt-4">
+          <Card>
+            <CardContent className="p-0">
+              {recipients.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-8">No recipients added yet. Edit this campaign to add contacts.</p>
+              ) : (
+                <ScrollArea className="max-h-[400px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Name</TableHead>
+                        <TableHead className="text-xs">Email</TableHead>
+                        <TableHead className="text-xs">Source</TableHead>
+                        <TableHead className="text-xs">Status</TableHead>
+                        <TableHead className="text-xs">Sent</TableHead>
+                        {campaign.campaign_type === "sequence" && <TableHead className="text-xs">Step</TableHead>}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recipients.map((r: any) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="text-xs font-medium">{r.name || "—"}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{r.email}</TableCell>
+                          <TableCell><Badge variant="outline" className="text-[9px]">{r.source === "customer" ? "CRM" : r.source === "csv_import" ? "CSV" : "Manual"}</Badge></TableCell>
+                          <TableCell><Badge className={`${RECIPIENT_STATUS_COLORS[r.status] || "bg-muted"} border-0 text-[10px]`}>{r.status}</Badge></TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{r.sent_at ? new Date(r.sent_at).toLocaleDateString() : "—"}</TableCell>
+                          {campaign.campaign_type === "sequence" && <TableCell className="text-xs">{r.current_step || 0}/{sequences.length}</TableCell>}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Schedule info */}
       {campaign.auto_schedule && (
