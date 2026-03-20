@@ -301,7 +301,7 @@ export default function Patients() {
           </p>
         </div>
         <Button onClick={() => { setEditing(null); setFormOpen(true); }} className="gap-1.5">
-          <Plus className="h-4 w-4" /> Add Patient
+          <Plus className="h-4 w-4" /> Add Contact
         </Button>
       </div>
 
