@@ -178,7 +178,7 @@ export default function Patients() {
     return (
       <div className="space-y-6">
         <Button variant="ghost" size="sm" onClick={() => setViewing(null)} className="gap-1">
-          <ChevronLeft className="h-4 w-4" /> Back to patients
+          <ChevronLeft className="h-4 w-4" /> Back to contacts
         </Button>
 
         <div className="flex items-start justify-between">
