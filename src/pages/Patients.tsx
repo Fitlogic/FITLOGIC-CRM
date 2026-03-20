@@ -109,7 +109,7 @@ export default function Patients() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
       setFormOpen(false);
-      toast({ title: "Patient added" });
+      toast({ title: "Contact added" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
