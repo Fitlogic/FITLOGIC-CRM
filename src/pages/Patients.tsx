@@ -308,7 +308,7 @@ export default function Patients() {
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search patients..."
+          placeholder="Search contacts..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9"
