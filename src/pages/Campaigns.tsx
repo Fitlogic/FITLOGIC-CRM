@@ -491,14 +491,13 @@ const Campaigns_Page = () => {
 
       {/* Campaign builder dialog */}
       <Dialog open={showBuilder} onOpenChange={v => { if (!v) closeBuilder(); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col [&>button]:z-10">
           <DialogHeader>
             <DialogTitle>
               {editingCampaign?.id ? "Edit Campaign" : editingCampaign?.campaign_type === "sequence" ? "New Email Sequence" : "New Campaign"}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-2">
-            <div className="space-y-4 py-2">
+          <div className="flex-1 overflow-y-auto pr-2 -mr-2 space-y-4 py-2 min-h-0">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-sm">Campaign Name</Label>
@@ -554,8 +553,7 @@ const Campaigns_Page = () => {
                   <SequenceBuilder steps={sequenceSteps} onChange={setSequenceSteps} />
                 </>
               )}
-            </div>
-          </ScrollArea>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeBuilder}>Cancel</Button>
             <Button className="gradient-brand text-primary-foreground" onClick={() => editingCampaign && saveCampaignMut.mutate(editingCampaign)} disabled={saveCampaignMut.isPending || !editingCampaign?.name}>

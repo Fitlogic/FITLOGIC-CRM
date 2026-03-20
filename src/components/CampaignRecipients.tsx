@@ -53,20 +53,31 @@ export function CampaignRecipients({ recipients, onChange, campaignId }: Campaig
   const { data: activeCampaignEmails = [] } = useQuery({
     queryKey: ["active-campaign-emails", campaignId],
     queryFn: async () => {
-      // Get all recipients in non-draft, non-completed campaigns
+      // First get active campaign IDs
+      const { data: activeCampaigns, error: cErr } = await supabase
+        .from("campaigns")
+        .select("id, name")
+        .in("status", ["scheduled", "sending", "paused"]);
+      if (cErr || !activeCampaigns?.length) return [];
+
+      const activeCampaignIds = activeCampaigns
+        .filter(c => c.id !== campaignId)
+        .map(c => c.id);
+      if (!activeCampaignIds.length) return [];
+
+      const campaignNameMap = Object.fromEntries(activeCampaigns.map(c => [c.id, c.name]));
+
       const { data, error } = await supabase
         .from("campaign_recipients")
-        .select("email, campaign_id, status, campaigns!inner(id, name, status)")
-        .in("campaigns.status", ["scheduled", "sending", "paused"])
+        .select("email, campaign_id, status")
+        .in("campaign_id", activeCampaignIds)
         .neq("status", "skipped");
       if (error) return [];
-      return (data || [])
-        .filter((r: any) => r.campaign_id !== campaignId)
-        .map((r: any) => ({
-          email: r.email.toLowerCase(),
-          campaignName: (r as any).campaigns?.name || "Unknown campaign",
-          status: r.status,
-        }));
+      return (data || []).map((r: any) => ({
+        email: r.email.toLowerCase(),
+        campaignName: campaignNameMap[r.campaign_id] || "Unknown campaign",
+        status: r.status,
+      }));
     },
   });
 
