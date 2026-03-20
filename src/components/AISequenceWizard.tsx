@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Sparkles, Loader2, Check, ArrowRight, ArrowLeft, Mail, Layers, Users, Clock, Eye, Lightbulb } from "lucide-react";
+import { Sparkles, Loader2, Check, ArrowRight, ArrowLeft, Mail, Layers, Users, Clock, Eye, Lightbulb, Pencil, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmailPreview } from "@/components/EmailPreview";
 import { supabase } from "@/integrations/supabase/client";
 import type { Segment } from "@/lib/campaign-data";
 
@@ -57,6 +58,7 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
   const [result, setResult] = useState<AIWizardResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
 
   const handleGenerate = async () => {
     setStep("generating");
@@ -75,7 +77,6 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
       if (fnError) throw new Error(fnError.message);
       if (data?.error) throw new Error(data.error);
 
-      // If the edge function returns a single email (old format), wrap it
       if (data && !data.emails) {
         setResult({
           campaignName: data.campaignName,
@@ -98,6 +99,13 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
     }
   };
 
+  const updateEmail = (idx: number, updates: Partial<GeneratedEmail>) => {
+    if (!result) return;
+    const newEmails = [...result.emails];
+    newEmails[idx] = { ...newEmails[idx], ...updates };
+    setResult({ ...result, emails: newEmails });
+  };
+
   const handleAccept = () => {
     if (result) {
       onAccept(result);
@@ -115,11 +123,12 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
     setResult(null);
     setError(null);
     setPreviewIdx(null);
+    setEditingIdx(null);
   };
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleReset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -129,7 +138,7 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
             {step === "goal" && "What's the goal of this campaign?"}
             {step === "details" && "Fine-tune the details"}
             {step === "generating" && "Building your campaign..."}
-            {step === "review" && "Review your AI-generated campaign"}
+            {step === "review" && "Review, edit, and preview your emails before accepting"}
           </DialogDescription>
         </DialogHeader>
 
@@ -188,7 +197,9 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
                     <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="1">1 email (single send)</SelectItem>
+                      <SelectItem value="2">2 emails (quick follow-up)</SelectItem>
                       <SelectItem value="3">3 emails (recommended)</SelectItem>
+                      <SelectItem value="4">4 emails (thorough)</SelectItem>
                       <SelectItem value="5">5 emails (full sequence)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -202,6 +213,7 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
                       <SelectItem value="casual">Casual & Friendly</SelectItem>
                       <SelectItem value="urgent">Urgent & Direct</SelectItem>
                       <SelectItem value="educational">Educational</SelectItem>
+                      <SelectItem value="witty">Witty & Bold</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -233,19 +245,24 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
 
           {step === "review" && result && (
             <div className="space-y-4 py-2">
+              {/* Campaign info - editable name */}
               <Card className="bg-primary/5 border-primary/20">
-                <CardContent className="p-4">
+                <CardContent className="p-4 space-y-2">
                   <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-heading font-semibold text-foreground">{result.campaignName}</h3>
+                    <div className="flex-1">
+                      <Input
+                        value={result.campaignName}
+                        onChange={e => setResult({ ...result, campaignName: e.target.value })}
+                        className="font-heading font-semibold text-foreground border-0 bg-transparent px-0 h-auto text-base focus-visible:ring-0 focus-visible:ring-offset-0"
+                      />
                       <Badge variant="outline" className="mt-1 text-[10px]">{result.category}</Badge>
                     </div>
                     <Badge className="bg-primary/10 text-primary border-0 text-[10px]">
-                      <Check className="h-3 w-3 mr-0.5" />AI Generated
+                      <Sparkles className="h-3 w-3 mr-0.5" />AI Generated
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground italic mt-2">{result.rationale}</p>
-                  <div className="flex gap-4 mt-3">
+                  <p className="text-xs text-muted-foreground italic">{result.rationale}</p>
+                  <div className="flex gap-4">
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Users className="h-3 w-3" />{result.suggestedSegment}
                     </div>
@@ -258,31 +275,110 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
 
               <Separator />
 
+              {/* Email list */}
               <div>
-                <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-1.5">
+                <h4 className="text-sm font-medium text-foreground mb-3 flex items-center gap-1.5">
                   <Layers className="h-4 w-4 text-primary" />
                   {result.emails.length} Email{result.emails.length !== 1 ? "s" : ""} in Sequence
+                  <span className="text-xs text-muted-foreground font-normal ml-2">Click to preview, pencil to edit</span>
                 </h4>
-                <div className="space-y-2">
-                  {result.emails.map((email, idx) => (
-                    <Card key={idx} className={`cursor-pointer transition-colors ${previewIdx === idx ? "border-primary" : "hover:border-primary/50"}`}
-                      onClick={() => setPreviewIdx(previewIdx === idx ? null : idx)}>
-                      <CardContent className="p-3">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px] font-mono shrink-0">Step {email.step}</Badge>
-                          {idx > 0 && <span className="text-[10px] text-muted-foreground">+{email.delayDays}d</span>}
-                          <span className="text-sm font-medium truncate flex-1">{email.subject}</span>
-                          <Eye className="h-3 w-3 text-muted-foreground shrink-0" />
-                        </div>
-                        {previewIdx === idx && (
-                          <div className="mt-3 pt-3 border-t">
-                            <p className="text-xs text-muted-foreground mb-2">{email.previewText}</p>
-                            <div className="rounded border bg-card p-3 text-sm" dangerouslySetInnerHTML={{ __html: email.bodyHtml }} />
+                <div className="space-y-3">
+                  {result.emails.map((email, idx) => {
+                    const isEditing = editingIdx === idx;
+                    const isPreviewing = previewIdx === idx;
+                    
+                    return (
+                      <Card key={idx} className={`transition-colors ${isPreviewing || isEditing ? "border-primary/40" : ""}`}>
+                        <CardContent className="p-0">
+                          {/* Header */}
+                          <div className="flex items-center gap-2 p-3">
+                            <Badge variant="outline" className="text-[10px] font-mono shrink-0">Step {email.step}</Badge>
+                            {idx > 0 && <span className="text-[10px] text-muted-foreground">+{email.delayDays}d</span>}
+                            <span className="text-sm font-medium truncate flex-1">{email.subject}</span>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant={isPreviewing ? "secondary" : "ghost"}
+                                size="sm" className="h-6 w-6 p-0"
+                                onClick={() => { setPreviewIdx(isPreviewing ? null : idx); setEditingIdx(null); }}
+                              >
+                                {isPreviewing ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              </Button>
+                              <Button
+                                variant={isEditing ? "secondary" : "ghost"}
+                                size="sm" className="h-6 w-6 p-0"
+                                onClick={() => { setEditingIdx(isEditing ? null : idx); setPreviewIdx(null); }}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
+
+                          {/* Tip */}
+                          {(isPreviewing || isEditing) && email.tip && (
+                            <p className="px-3 text-[10px] text-muted-foreground italic">💡 {email.tip}</p>
+                          )}
+
+                          {/* Preview */}
+                          {isPreviewing && (
+                            <div className="px-3 pb-3 border-t mt-2">
+                              <EmailPreview
+                                html={email.bodyHtml}
+                                subject={email.subject}
+                                previewText={email.previewText}
+                                className="mt-3"
+                              />
+                            </div>
+                          )}
+
+                          {/* Edit mode */}
+                          {isEditing && (
+                            <div className="px-3 pb-3 space-y-2 border-t mt-2 pt-3">
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Subject</Label>
+                                <Input
+                                  value={email.subject}
+                                  onChange={e => updateEmail(idx, { subject: e.target.value })}
+                                  className="mt-1 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Preview Text</Label>
+                                <Input
+                                  value={email.previewText}
+                                  onChange={e => updateEmail(idx, { previewText: e.target.value })}
+                                  className="mt-1 text-sm"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Label className="text-xs text-muted-foreground">Delay (days)</Label>
+                                  <Select
+                                    value={String(email.delayDays)}
+                                    onValueChange={v => updateEmail(idx, { delayDays: parseInt(v) })}
+                                  >
+                                    <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      {[0, 1, 2, 3, 4, 5, 7, 10, 14].map(d => (
+                                        <SelectItem key={d} value={String(d)}>{d === 0 ? "Immediately" : `${d} day${d > 1 ? "s" : ""}`}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Email Body (HTML)</Label>
+                                <Textarea
+                                  value={email.bodyHtml}
+                                  onChange={e => updateEmail(idx, { bodyHtml: e.target.value })}
+                                  className="mt-1 text-sm font-mono min-h-[150px]"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -309,6 +405,9 @@ export function AISequenceWizard({ open, onOpenChange, segments, onAccept }: AIS
           {step === "review" && (
             <>
               <Button variant="outline" onClick={handleReset}>Start Over</Button>
+              <Button variant="outline" onClick={() => setStep("details")}>
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />Regenerate
+              </Button>
               <Button className="gradient-brand text-primary-foreground" onClick={handleAccept}>
                 <Check className="h-4 w-4 mr-1.5" />Use This Campaign
               </Button>
