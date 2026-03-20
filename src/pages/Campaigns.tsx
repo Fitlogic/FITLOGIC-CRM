@@ -548,24 +548,36 @@ const Campaigns_Page = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Template editor */}
+      {/* Template editor with live preview */}
       <Dialog open={showTemplateEditor} onOpenChange={v => { if (!v) { setShowTemplateEditor(false); setEditingTemplate(null); } }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
           <DialogHeader><DialogTitle>{editingTemplate?.id ? "Edit Template" : "New Template"}</DialogTitle></DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-sm">Name</Label><Input value={editingTemplate?.name || ""} onChange={e => setEditingTemplate(p => ({ ...p, name: e.target.value }))} /></div>
-              <div><Label className="text-sm">Category</Label>
-                <Select value={editingTemplate?.category || "welcome"} onValueChange={v => setEditingTemplate(p => ({ ...p, category: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{Object.entries(TEMPLATE_CATEGORY_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-                </Select>
+          <ScrollArea className="flex-1 pr-2">
+            <div className="grid grid-cols-2 gap-4 mt-2">
+              {/* Edit side */}
+              <div className="space-y-3">
+                <div><Label className="text-sm">Name</Label><Input value={editingTemplate?.name || ""} onChange={e => setEditingTemplate(p => ({ ...p, name: e.target.value }))} /></div>
+                <div><Label className="text-sm">Category</Label>
+                  <Select value={editingTemplate?.category || "welcome"} onValueChange={v => setEditingTemplate(p => ({ ...p, category: v }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(TEMPLATE_CATEGORY_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label className="text-sm">Subject Line</Label><Input value={editingTemplate?.subject || ""} onChange={e => setEditingTemplate(p => ({ ...p, subject: e.target.value }))} /></div>
+                <div><Label className="text-sm">Preview Text</Label><Input value={editingTemplate?.preview_text || ""} onChange={e => setEditingTemplate(p => ({ ...p, preview_text: e.target.value }))} /></div>
+                <div><Label className="text-sm">Body HTML</Label><Textarea value={editingTemplate?.body_html || ""} onChange={e => setEditingTemplate(p => ({ ...p, body_html: e.target.value }))} className="min-h-[250px] font-mono text-xs" /></div>
+              </div>
+              {/* Live preview side */}
+              <div>
+                <Label className="text-sm mb-2 block">Live Preview</Label>
+                <EmailPreview
+                  html={editingTemplate?.body_html || ""}
+                  subject={editingTemplate?.subject || ""}
+                  previewText={editingTemplate?.preview_text || ""}
+                />
               </div>
             </div>
-            <div><Label className="text-sm">Subject Line</Label><Input value={editingTemplate?.subject || ""} onChange={e => setEditingTemplate(p => ({ ...p, subject: e.target.value }))} /></div>
-            <div><Label className="text-sm">Preview Text</Label><Input value={editingTemplate?.preview_text || ""} onChange={e => setEditingTemplate(p => ({ ...p, preview_text: e.target.value }))} /></div>
-            <div><Label className="text-sm">Body HTML</Label><Textarea value={editingTemplate?.body_html || ""} onChange={e => setEditingTemplate(p => ({ ...p, body_html: e.target.value }))} className="min-h-[200px] font-mono text-xs" /></div>
-          </div>
+          </ScrollArea>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowTemplateEditor(false); setEditingTemplate(null); }}>Cancel</Button>
             <Button className="gradient-brand text-primary-foreground" onClick={() => editingTemplate && saveTemplateMut.mutate(editingTemplate)} disabled={saveTemplateMut.isPending}>Save</Button>
@@ -575,14 +587,13 @@ const Campaigns_Page = () => {
 
       {/* Template preview */}
       <Dialog open={!!previewTemplate} onOpenChange={v => !v && setPreviewTemplate(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>{previewTemplate?.name}</DialogTitle></DialogHeader>
-          <div className="space-y-2 text-sm">
-            <p><span className="text-muted-foreground">Subject:</span> {previewTemplate?.subject}</p>
-            <p><span className="text-muted-foreground">Preview:</span> {previewTemplate?.preview_text}</p>
-            <Separator />
-            <div className="rounded-lg border bg-card p-4" dangerouslySetInnerHTML={{ __html: previewTemplate?.body_html || "" }} />
-          </div>
+          <EmailPreview
+            html={previewTemplate?.body_html || ""}
+            subject={previewTemplate?.subject || ""}
+            previewText={previewTemplate?.preview_text || ""}
+          />
           <DialogFooter><Button variant="outline" onClick={() => setPreviewTemplate(null)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
