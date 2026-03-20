@@ -77,14 +77,22 @@ export function EmailPreview({ html, subject, previewText, className }: EmailPre
             <iframe
               srcDoc={wrappedHtml}
               className="w-full border-0"
-              style={{ minHeight: 300, height: "auto" }}
+              style={{ minHeight: 300 }}
               sandbox="allow-same-origin"
               title="Email preview"
               onLoad={(e) => {
                 const iframe = e.target as HTMLIFrameElement;
-                if (iframe.contentDocument?.body) {
-                  iframe.style.height = Math.max(300, iframe.contentDocument.body.scrollHeight + 40) + "px";
-                }
+                const resize = () => {
+                  if (iframe.contentDocument?.body) {
+                    const h = iframe.contentDocument.body.scrollHeight + 40;
+                    iframe.style.height = Math.max(300, h) + "px";
+                  }
+                };
+                resize();
+                // Re-check after images load and content settles
+                setTimeout(resize, 200);
+                setTimeout(resize, 600);
+                setTimeout(resize, 1500);
               }}
             />
           </div>

@@ -281,8 +281,18 @@ Return an improved version maintaining the same general intent but with better c
                       {isPreviewing ? (
                         <EmailPreview html={step.body_html} subject={step.subject} />
                       ) : (
-                        <Textarea value={step.body_html} onChange={(e) => updateStep(step.id, { body_html: e.target.value })}
-                          placeholder="Write your email content as HTML..." className="text-sm font-mono min-h-[180px]" />
+                        <div className="space-y-3">
+                          <Textarea value={step.body_html} onChange={(e) => updateStep(step.id, { body_html: e.target.value })}
+                            placeholder="Write your email content as HTML..." className="text-sm font-mono min-h-[180px]" />
+                          {step.body_html && (
+                            <div>
+                              <p className="text-[10px] text-muted-foreground mb-1.5">Live Preview</p>
+                              <div className="rounded-md border bg-background p-4">
+                                <div className="prose prose-sm max-w-none text-foreground [&_a]:text-primary" dangerouslySetInnerHTML={{ __html: step.body_html }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
