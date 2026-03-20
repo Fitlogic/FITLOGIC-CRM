@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft, Pencil, Clock, Pause, Play, Send, Eye, Users,
-  AlertTriangle, ChevronDown, ChevronUp, Mail, Layers, UserPlus
+  ChevronDown, ChevronUp, Mail, Layers, UserPlus, Calendar,
+  CalendarClock, Shield, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +14,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { EmailPreview } from "@/components/EmailPreview";
 import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
@@ -46,6 +52,8 @@ const RECIPIENT_STATUS_COLORS: Record<string, string> = {
   skipped: "bg-muted text-muted-foreground",
 };
 
+const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -54,6 +62,20 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   const [activeDetailTab, setActiveDetailTab] = useState("overview");
   const [showAddRecipients, setShowAddRecipients] = useState(false);
   const [newRecipients, setNewRecipients] = useState<Recipient[]>([]);
+  const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+
+  // Schedule config state
+  const [scheduleDate, setScheduleDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(9, 0, 0, 0);
+    return d.toISOString().slice(0, 16);
+  });
+  const [autoSchedule, setAutoSchedule] = useState(campaign.auto_schedule ?? true);
+  const [maxSendsPerDay, setMaxSendsPerDay] = useState(campaign.max_sends_per_day ?? 50);
+  const [businessHoursStart, setBusinessHoursStart] = useState(campaign.business_hours_start ?? 8);
+  const [businessHoursEnd, setBusinessHoursEnd] = useState(campaign.business_hours_end ?? 18);
+  const [businessDays, setBusinessDays] = useState<string[]>(campaign.business_days ?? ["Mon", "Tue", "Wed", "Thu", "Fri"]);
 
   const { data: recipients = [], refetch: refetchRecipients } = useQuery({
     queryKey: ["campaign-recipients", campaign.id],
@@ -89,9 +111,7 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   });
 
   const updateStatusMut = useMutation({
-    mutationFn: async ({ status, scheduled_at }: { status: string; scheduled_at?: string }) => {
-      const upd: any = { status };
-      if (scheduled_at) upd.scheduled_at = scheduled_at;
+    mutationFn: async (upd: Record<string, any>) => {
       const { error } = await supabase.from("campaigns").update(upd).eq("id", campaign.id);
       if (error) throw error;
     },
@@ -100,7 +120,6 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
 
   const addRecipientsMut = useMutation({
     mutationFn: async (recs: Recipient[]) => {
-      // Only add new emails (avoid duplicates within this campaign)
       const existingEmails = new Set(recipients.map(r => r.email.toLowerCase()));
       const toAdd = recs.filter(r => !existingEmails.has(r.email.toLowerCase()));
       if (toAdd.length === 0) throw new Error("All contacts are already in this campaign");
@@ -118,7 +137,6 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
       );
       if (error) throw error;
 
-      // Update recipient count
       await supabase.from("campaigns").update({
         recipient_count: recipients.length + toAdd.length,
       }).eq("id", campaign.id);
@@ -135,15 +153,28 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const handleSchedule = () => {
-    const scheduled = new Date(Date.now() + 86400000).toISOString();
-    updateStatusMut.mutate({ status: "scheduled", scheduled_at: scheduled });
-    toast({ title: "Campaign scheduled" });
+  const handleConfirmSchedule = () => {
+    updateStatusMut.mutate({
+      status: "scheduled",
+      scheduled_at: new Date(scheduleDate).toISOString(),
+      auto_schedule: autoSchedule,
+      max_sends_per_day: maxSendsPerDay,
+      business_hours_start: businessHoursStart,
+      business_hours_end: businessHoursEnd,
+      business_days: businessDays,
+    });
+    setShowSchedulePanel(false);
+    toast({ title: "Campaign scheduled", description: `Starts ${new Date(scheduleDate).toLocaleString()}` });
   };
 
   const sentRecipients = recipients.filter(r => r.status !== "pending");
   const pendingRecipients = recipients.filter(r => r.status === "pending");
   const totalDays = sequences.reduce((sum: number, s: any) => sum + (s.delay_days || 0), 0);
+  const estimatedSendDays = maxSendsPerDay > 0 ? Math.ceil(recipients.length / maxSendsPerDay) : 0;
+
+  const toggleDay = (day: string) => {
+    setBusinessDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -160,11 +191,6 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
               </Badge>
             )}
             <span className="text-xs text-muted-foreground">{recipients.length} recipients</span>
-            {campaign.auto_schedule && (
-              <Badge variant="outline" className="text-[10px] text-primary">
-                <Clock className="h-2.5 w-2.5 mr-0.5" />Auto • {campaign.max_sends_per_day}/day
-              </Badge>
-            )}
           </div>
         </div>
         <div className="flex gap-2">
@@ -174,21 +200,145 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
           {campaign.status === "draft" && (
             <>
               <Button variant="outline" size="sm" onClick={() => onEdit(campaign)}><Pencil className="h-3.5 w-3.5 mr-1" />Edit</Button>
-              <Button size="sm" className="gradient-brand text-primary-foreground" onClick={handleSchedule} disabled={recipients.length === 0}>
-                <Clock className="h-3.5 w-3.5 mr-1" />Schedule
+              <Button size="sm" className="gradient-brand text-primary-foreground"
+                onClick={() => setShowSchedulePanel(true)} disabled={recipients.length === 0}>
+                <CalendarClock className="h-3.5 w-3.5 mr-1" />Schedule
               </Button>
             </>
           )}
           {campaign.status === "scheduled" && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => updateStatusMut.mutate({ status: "paused" })}><Pause className="h-3.5 w-3.5 mr-1" />Pause</Button>
-            </>
+            <Button variant="outline" size="sm" onClick={() => {
+              updateStatusMut.mutate({ status: "paused" });
+              toast({ title: "Campaign paused" });
+            }}>
+              <Pause className="h-3.5 w-3.5 mr-1" />Pause
+            </Button>
           )}
           {campaign.status === "paused" && (
-            <Button size="sm" className="gradient-brand text-primary-foreground" onClick={handleSchedule}><Play className="h-3.5 w-3.5 mr-1" />Resume</Button>
+            <Button size="sm" className="gradient-brand text-primary-foreground"
+              onClick={() => setShowSchedulePanel(true)}>
+              <Play className="h-3.5 w-3.5 mr-1" />Resume
+            </Button>
           )}
         </div>
       </div>
+
+      {/* Inline Schedule Panel */}
+      {showSchedulePanel && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-semibold text-sm text-foreground flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-primary" />
+                Schedule Campaign
+              </h3>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowSchedulePanel(false)}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Start date/time */}
+              <div>
+                <Label className="text-xs">Start Sending</Label>
+                <Input
+                  type="datetime-local"
+                  value={scheduleDate}
+                  onChange={e => setScheduleDate(e.target.value)}
+                  className="mt-1 h-9 text-sm"
+                />
+              </div>
+
+              {/* Max sends per day */}
+              <div>
+                <Label className="text-xs">Max Emails / Day</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Input
+                    type="number" min={1} max={50}
+                    value={maxSendsPerDay}
+                    onChange={e => setMaxSendsPerDay(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
+                    className="h-9 text-sm w-24"
+                  />
+                  <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Shield className="h-3 w-3" />Max 50 to avoid spam filters
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Business hours */}
+            <div>
+              <Label className="text-xs">Business Hours</Label>
+              <div className="flex items-center gap-2 mt-1">
+                <Select value={String(businessHoursStart)} onValueChange={v => setBusinessHoursStart(parseInt(v))}>
+                  <SelectTrigger className="h-9 text-sm w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>{Array.from({ length: 14 }, (_, i) => i + 6).map(h => <SelectItem key={h} value={String(h)}>{h}:00</SelectItem>)}</SelectContent>
+                </Select>
+                <span className="text-xs text-muted-foreground">to</span>
+                <Select value={String(businessHoursEnd)} onValueChange={v => setBusinessHoursEnd(parseInt(v))}>
+                  <SelectTrigger className="h-9 text-sm w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>{Array.from({ length: 14 }, (_, i) => i + 10).map(h => <SelectItem key={h} value={String(h)}>{h}:00</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Send days */}
+            <div>
+              <Label className="text-xs">Send Days</Label>
+              <div className="flex gap-1.5 mt-1.5">
+                {ALL_DAYS.map(day => (
+                  <button
+                    key={day}
+                    onClick={() => toggleDay(day)}
+                    className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+                      businessDays.includes(day)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Auto-schedule toggle */}
+            <div className="flex items-center justify-between rounded-lg border p-3 bg-background">
+              <div>
+                <p className="text-xs font-medium text-foreground">Auto-Schedule</p>
+                <p className="text-[10px] text-muted-foreground">Automatically space sends across business days</p>
+              </div>
+              <Switch checked={autoSchedule} onCheckedChange={setAutoSchedule} />
+            </div>
+
+            <Separator />
+
+            {/* Summary + confirm */}
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <p className="flex items-center gap-1.5">
+                  <Calendar className="h-3 w-3" />
+                  {recipients.length} recipients → ~{estimatedSendDays} business day{estimatedSendDays !== 1 ? "s" : ""} to complete
+                </p>
+                {campaign.campaign_type === "sequence" && (
+                  <p className="flex items-center gap-1.5">
+                    <Layers className="h-3 w-3" />
+                    {sequences.length} emails over {totalDays} days per recipient
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setShowSchedulePanel(false)}>Cancel</Button>
+                <Button size="sm" className="gradient-brand text-primary-foreground" onClick={handleConfirmSchedule}
+                  disabled={recipients.length === 0 || updateStatusMut.isPending}>
+                  <Send className="h-3.5 w-3.5 mr-1" />
+                  {updateStatusMut.isPending ? "Scheduling..." : "Confirm & Schedule"}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -206,6 +356,33 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
             <span className="font-semibold">{Math.round((sentRecipients.length / recipients.length) * 100)}%</span>
           </div>
           <Progress value={(sentRecipients.length / recipients.length) * 100} className="h-2" />
+        </div>
+      )}
+
+      {/* Sequence Timeline (visual overview for sequences) */}
+      {campaign.campaign_type === "sequence" && sequences.length > 1 && (
+        <div className="flex items-center gap-1 px-2 py-3 rounded-lg border bg-muted/20 overflow-x-auto">
+          {sequences.map((s: any, i: number) => (
+            <div key={s.id} className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setExpandedSequence(expandedSequence === s.id ? null : s.id)}
+                className={`flex items-center justify-center h-8 w-8 rounded-full text-xs font-bold transition-colors ${
+                  expandedSequence === s.id
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-primary/15 text-primary hover:bg-primary/25"
+                }`}
+              >
+                {i + 1}
+              </button>
+              {i < sequences.length - 1 && (
+                <div className="flex items-center gap-0.5 px-1">
+                  <div className="w-6 h-px bg-border" />
+                  <span className="text-[9px] text-muted-foreground font-medium">{sequences[i + 1].delay_days}d</span>
+                  <div className="w-6 h-px bg-border" />
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -291,18 +468,27 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
         </TabsContent>
       </Tabs>
 
-      {/* Schedule info */}
-      {campaign.auto_schedule && (
+      {/* Schedule info (when already scheduled) */}
+      {campaign.status !== "draft" && (campaign.auto_schedule || campaign.scheduled_at) && (
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-sm">
               <Clock className="h-4 w-4 text-primary" />
-              <span className="font-medium text-foreground">Auto-Scheduling Active</span>
+              <span className="font-medium text-foreground">
+                {campaign.status === "scheduled" ? "Scheduled" : campaign.status === "paused" ? "Paused" : "Schedule Settings"}
+              </span>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Sending up to {campaign.max_sends_per_day} emails/day between {campaign.business_hours_start}:00–{campaign.business_hours_end}:00,
-              {" "}{campaign.business_days?.join(", ") || "Mon–Fri"}
-            </p>
+            <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+              {campaign.scheduled_at && (
+                <p>Start: {new Date(campaign.scheduled_at).toLocaleString()}</p>
+              )}
+              {campaign.auto_schedule && (
+                <p>
+                  Up to {campaign.max_sends_per_day} emails/day, {campaign.business_hours_start}:00–{campaign.business_hours_end}:00,
+                  {" "}{campaign.business_days?.join(", ") || "Mon–Fri"}
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
