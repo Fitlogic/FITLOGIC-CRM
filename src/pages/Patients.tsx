@@ -143,7 +143,7 @@ export default function Patients() {
       }
       setEditing(null);
       setFormOpen(false);
-      toast({ title: "Patient updated" });
+      toast({ title: "Contact updated" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
