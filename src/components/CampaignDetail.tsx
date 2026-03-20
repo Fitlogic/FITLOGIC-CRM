@@ -2,20 +2,21 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  ArrowLeft, Pencil, Clock, Pause, Play, Send, Check, Eye, Users,
-  MousePointerClick, AlertTriangle, UserMinus, BarChart3, Mail, Layers, Trash2,
-  ChevronDown, ChevronUp
+  ArrowLeft, Pencil, Clock, Pause, Play, Send, Eye, Users,
+  AlertTriangle, ChevronDown, ChevronUp, Mail, Layers, UserPlus
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { EmailPreview } from "@/components/EmailPreview";
-import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus, type CampaignStats } from "@/lib/types";
+import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
+import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus } from "@/lib/types";
 
 interface CampaignRow {
   id: string; name: string; status: string; campaign_type: string;
@@ -24,6 +25,7 @@ interface CampaignRow {
   created_at: string; updated_at: string;
   auto_schedule?: boolean; max_sends_per_day?: number;
   business_hours_start?: number; business_hours_end?: number;
+  business_days?: string[];
   recipient_count?: number; sent_count?: number;
 }
 
@@ -50,8 +52,10 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   const cfg = CAMPAIGN_STATUS_CONFIG[campaign.status as CampaignStatus] || CAMPAIGN_STATUS_CONFIG.draft;
   const [expandedSequence, setExpandedSequence] = useState<string | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState("overview");
+  const [showAddRecipients, setShowAddRecipients] = useState(false);
+  const [newRecipients, setNewRecipients] = useState<Recipient[]>([]);
 
-  const { data: recipients = [] } = useQuery({
+  const { data: recipients = [], refetch: refetchRecipients } = useQuery({
     queryKey: ["campaign-recipients", campaign.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -94,6 +98,43 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["campaigns"] }),
   });
 
+  const addRecipientsMut = useMutation({
+    mutationFn: async (recs: Recipient[]) => {
+      // Only add new emails (avoid duplicates within this campaign)
+      const existingEmails = new Set(recipients.map(r => r.email.toLowerCase()));
+      const toAdd = recs.filter(r => !existingEmails.has(r.email.toLowerCase()));
+      if (toAdd.length === 0) throw new Error("All contacts are already in this campaign");
+      
+      const { error } = await supabase.from("campaign_recipients").insert(
+        toAdd.map(r => ({
+          campaign_id: campaign.id,
+          email: r.email,
+          name: r.name,
+          patient_id: r.patient_id || null,
+          source: r.source,
+          status: "pending",
+          current_step: 0,
+        }))
+      );
+      if (error) throw error;
+
+      // Update recipient count
+      await supabase.from("campaigns").update({
+        recipient_count: recipients.length + toAdd.length,
+      }).eq("id", campaign.id);
+
+      return toAdd.length;
+    },
+    onSuccess: (count) => {
+      refetchRecipients();
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      setShowAddRecipients(false);
+      setNewRecipients([]);
+      toast({ title: `Added ${count} recipient(s)` });
+    },
+    onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const handleSchedule = () => {
     const scheduled = new Date(Date.now() + 86400000).toISOString();
     updateStatusMut.mutate({ status: "scheduled", scheduled_at: scheduled });
@@ -127,6 +168,9 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowAddRecipients(true)}>
+            <UserPlus className="h-3.5 w-3.5 mr-1" />Add People
+          </Button>
           {campaign.status === "draft" && (
             <>
               <Button variant="outline" size="sm" onClick={() => onEdit(campaign)}><Pencil className="h-3.5 w-3.5 mr-1" />Edit</Button>
@@ -136,7 +180,9 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
             </>
           )}
           {campaign.status === "scheduled" && (
-            <Button variant="outline" size="sm" onClick={() => updateStatusMut.mutate({ status: "paused" })}><Pause className="h-3.5 w-3.5 mr-1" />Pause</Button>
+            <>
+              <Button variant="outline" size="sm" onClick={() => updateStatusMut.mutate({ status: "paused" })}><Pause className="h-3.5 w-3.5 mr-1" />Pause</Button>
+            </>
           )}
           {campaign.status === "paused" && (
             <Button size="sm" className="gradient-brand text-primary-foreground" onClick={handleSchedule}><Play className="h-3.5 w-3.5 mr-1" />Resume</Button>
@@ -163,36 +209,20 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
         </div>
       )}
 
-      {/* Tabs for content / recipients */}
+      {/* Tabs */}
       <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab}>
         <TabsList>
-          <TabsTrigger value="overview" className="text-xs">
-            <Mail className="h-3 w-3 mr-1" />Email Content
-          </TabsTrigger>
-          <TabsTrigger value="recipients" className="text-xs">
-            <Users className="h-3 w-3 mr-1" />Recipients ({recipients.length})
-          </TabsTrigger>
+          <TabsTrigger value="overview" className="text-xs"><Mail className="h-3 w-3 mr-1" />Email Content</TabsTrigger>
+          <TabsTrigger value="recipients" className="text-xs"><Users className="h-3 w-3 mr-1" />Recipients ({recipients.length})</TabsTrigger>
         </TabsList>
 
-        {/* Email content tab */}
         <TabsContent value="overview" className="mt-4 space-y-4">
-          {/* Single campaign - show template */}
           {campaign.campaign_type === "single" && template && (
-            <EmailPreview
-              html={template.body_html || ""}
-              subject={template.subject}
-              previewText={template.preview_text || undefined}
-            />
+            <EmailPreview html={template.body_html || ""} subject={template.subject} previewText={template.preview_text || undefined} />
           )}
           {campaign.campaign_type === "single" && !template && (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground text-sm">
-                No template linked. Edit this campaign to add one.
-              </CardContent>
-            </Card>
+            <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">No template linked. Edit this campaign to add one.</CardContent></Card>
           )}
-
-          {/* Sequence - show all emails */}
           {campaign.campaign_type === "sequence" && sequences.length > 0 && (
             <div className="space-y-3">
               {sequences.map((s: any, i: number) => {
@@ -210,11 +240,7 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                     </button>
                     {isOpen && (
                       <div className="px-4 pb-4 border-t">
-                        <EmailPreview
-                          html={s.body_html_override || ""}
-                          subject={s.subject_override || ""}
-                          className="mt-3"
-                        />
+                        <EmailPreview html={s.body_html_override || ""} subject={s.subject_override || ""} className="mt-3" />
                       </div>
                     )}
                   </Card>
@@ -223,20 +249,15 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
             </div>
           )}
           {campaign.campaign_type === "sequence" && sequences.length === 0 && (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground text-sm">
-                No sequence steps yet. Edit this campaign to add emails.
-              </CardContent>
-            </Card>
+            <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">No sequence steps yet. Edit this campaign to add emails.</CardContent></Card>
           )}
         </TabsContent>
 
-        {/* Recipients tab */}
         <TabsContent value="recipients" className="mt-4">
           <Card>
             <CardContent className="p-0">
               {recipients.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-8">No recipients added yet. Edit this campaign to add contacts.</p>
+                <p className="text-xs text-muted-foreground text-center py-8">No recipients added yet.</p>
               ) : (
                 <ScrollArea className="max-h-[400px]">
                   <Table>
@@ -280,11 +301,37 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Sending up to {campaign.max_sends_per_day} emails/day between {campaign.business_hours_start}:00–{campaign.business_hours_end}:00,
-              {" "}{(campaign as any).business_days?.join(", ") || "Mon–Fri"}
+              {" "}{campaign.business_days?.join(", ") || "Mon–Fri"}
             </p>
           </CardContent>
         </Card>
       )}
+
+      {/* Add Recipients Dialog */}
+      <Dialog open={showAddRecipients} onOpenChange={v => { if (!v) { setShowAddRecipients(false); setNewRecipients([]); } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Add Recipients to "{campaign.name}"</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto py-2">
+            <CampaignRecipients
+              recipients={newRecipients}
+              onChange={setNewRecipients}
+              campaignId={campaign.id}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowAddRecipients(false); setNewRecipients([]); }}>Cancel</Button>
+            <Button
+              className="gradient-brand text-primary-foreground"
+              onClick={() => addRecipientsMut.mutate(newRecipients)}
+              disabled={newRecipients.length === 0 || addRecipientsMut.isPending}
+            >
+              {addRecipientsMut.isPending ? "Adding..." : `Add ${newRecipients.length} Recipient(s)`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -135,8 +135,30 @@ const Campaigns_Page = () => {
         const { error } = await supabase.from("campaigns").update(campaignData).eq("id", c.id);
         if (error) throw error;
         campaignId = c.id;
-        // Clear old recipients and sequences
-        await supabase.from("campaign_recipients").delete().eq("campaign_id", c.id);
+
+        // For recipients: only delete pending ones (preserve sent/opened/clicked tracking)
+        // Then re-insert the full list, skipping emails that already have non-pending status
+        const { data: existingRecs } = await supabase
+          .from("campaign_recipients").select("email, status").eq("campaign_id", c.id);
+        const trackedEmails = new Set(
+          (existingRecs || []).filter(r => r.status !== "pending").map(r => r.email.toLowerCase())
+        );
+        // Remove only pending recipients (safe to replace)
+        await supabase.from("campaign_recipients")
+          .delete().eq("campaign_id", c.id).eq("status", "pending");
+
+        // Add recipients that aren't already tracked
+        const newRecs = recipients.filter(r => !trackedEmails.has(r.email.toLowerCase()));
+        if (newRecs.length > 0) {
+          await supabase.from("campaign_recipients").insert(
+            newRecs.map(r => ({
+              campaign_id: campaignId, email: r.email, name: r.name,
+              patient_id: r.patient_id || null, source: r.source,
+            }))
+          );
+        }
+
+        // Sequences: always replace (content edits)
         if (campaignType === "sequence") {
           await supabase.from("campaign_sequences").delete().eq("campaign_id", c.id);
         }
@@ -146,30 +168,24 @@ const Campaigns_Page = () => {
         }).select().single();
         if (error) throw error;
         campaignId = newCampaign.id;
-      }
 
-      // Save recipients
-      if (recipients.length > 0) {
-        const { error: recErr } = await supabase.from("campaign_recipients").insert(
-          recipients.map(r => ({
-            campaign_id: campaignId,
-            email: r.email,
-            name: r.name,
-            patient_id: r.patient_id || null,
-            source: r.source,
-          }))
-        );
-        if (recErr) throw recErr;
+        // Save recipients (new campaign — all are new)
+        if (recipients.length > 0) {
+          await supabase.from("campaign_recipients").insert(
+            recipients.map(r => ({
+              campaign_id: campaignId, email: r.email, name: r.name,
+              patient_id: r.patient_id || null, source: r.source,
+            }))
+          );
+        }
       }
 
       // Save sequence steps
       if (campaignType === "sequence" && sequenceSteps.length > 0) {
         const { error: seqErr } = await supabase.from("campaign_sequences").insert(
           sequenceSteps.map(s => ({
-            campaign_id: campaignId,
-            step_number: s.step_number,
-            delay_days: s.delay_days,
-            subject_override: s.subject,
+            campaign_id: campaignId, step_number: s.step_number,
+            delay_days: s.delay_days, subject_override: s.subject,
             body_html_override: s.body_html,
           }))
         );
@@ -524,7 +540,7 @@ const Campaigns_Page = () => {
               <Separator />
 
               {/* Recipients */}
-              <CampaignRecipients recipients={recipients} onChange={setRecipients} />
+              <CampaignRecipients recipients={recipients} onChange={setRecipients} campaignId={editingCampaign?.id} />
 
               <Separator />
 
