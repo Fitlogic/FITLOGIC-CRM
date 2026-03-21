@@ -341,11 +341,12 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
       )}
 
       {/* Stats overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-primary/10 p-2.5"><Users className="h-4 w-4 text-primary" /></div><div><p className="text-xs text-muted-foreground">Recipients</p><p className="text-lg font-bold font-heading">{recipients.length}</p></div></CardContent></Card>
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-status-resolved/10 p-2.5"><Send className="h-4 w-4 text-status-resolved" /></div><div><p className="text-xs text-muted-foreground">Sent</p><p className="text-lg font-bold font-heading">{sentRecipients.length}</p></div></CardContent></Card>
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-muted p-2.5"><Clock className="h-4 w-4 text-muted-foreground" /></div><div><p className="text-xs text-muted-foreground">Pending</p><p className="text-lg font-bold font-heading">{pendingRecipients.length}</p></div></CardContent></Card>
-        <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-category-scheduling/10 p-2.5"><Eye className="h-4 w-4 text-category-scheduling" /></div><div><p className="text-xs text-muted-foreground">Opened</p><p className="text-lg font-bold font-heading">{recipients.filter(r => r.opened_at).length}</p></div></CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-category-scheduling/10 p-2.5"><Eye className="h-4 w-4 text-category-scheduling" /></div><div><p className="text-xs text-muted-foreground">Opened</p><p className="text-lg font-bold font-heading">{recipients.filter(r => r.opened_at).length}</p>{recipients.length > 0 && sentRecipients.length > 0 && <p className="text-[10px] text-muted-foreground">{Math.round((recipients.filter(r => r.opened_at).length / sentRecipients.length) * 100)}%</p>}</div></CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-category-health/10 p-2.5"><MousePointerClick className="h-4 w-4 text-category-health" /></div><div><p className="text-xs text-muted-foreground">Clicked</p><p className="text-lg font-bold font-heading">{recipients.filter(r => r.clicked_at).length}</p>{recipients.length > 0 && sentRecipients.length > 0 && <p className="text-[10px] text-muted-foreground">{Math.round((recipients.filter(r => r.clicked_at).length / sentRecipients.length) * 100)}%</p>}</div></CardContent></Card>
       </div>
 
       {/* Progress bar */}
