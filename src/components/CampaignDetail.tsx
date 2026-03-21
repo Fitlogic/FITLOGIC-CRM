@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft, Pencil, Clock, Pause, Play, Send, Eye, Users,
   ChevronDown, ChevronUp, Mail, Layers, UserPlus, Calendar,
-  CalendarClock, Shield, X
+  CalendarClock, Shield, X, MousePointerClick, Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { EmailPreview } from "@/components/EmailPreview";
 import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
 import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus } from "@/lib/types";
+import { CampaignActivityLog } from "@/components/CampaignActivityLog";
 
 interface CampaignRow {
   id: string; name: string; status: string; campaign_type: string;
@@ -341,11 +342,12 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
       )}
 
       {/* Stats overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-primary/10 p-2.5"><Users className="h-4 w-4 text-primary" /></div><div><p className="text-xs text-muted-foreground">Recipients</p><p className="text-lg font-bold font-heading">{recipients.length}</p></div></CardContent></Card>
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-status-resolved/10 p-2.5"><Send className="h-4 w-4 text-status-resolved" /></div><div><p className="text-xs text-muted-foreground">Sent</p><p className="text-lg font-bold font-heading">{sentRecipients.length}</p></div></CardContent></Card>
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-muted p-2.5"><Clock className="h-4 w-4 text-muted-foreground" /></div><div><p className="text-xs text-muted-foreground">Pending</p><p className="text-lg font-bold font-heading">{pendingRecipients.length}</p></div></CardContent></Card>
-        <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-category-scheduling/10 p-2.5"><Eye className="h-4 w-4 text-category-scheduling" /></div><div><p className="text-xs text-muted-foreground">Opened</p><p className="text-lg font-bold font-heading">{recipients.filter(r => r.opened_at).length}</p></div></CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-category-scheduling/10 p-2.5"><Eye className="h-4 w-4 text-category-scheduling" /></div><div><p className="text-xs text-muted-foreground">Opened</p><p className="text-lg font-bold font-heading">{recipients.filter(r => r.opened_at).length}</p>{recipients.length > 0 && sentRecipients.length > 0 && <p className="text-[10px] text-muted-foreground">{Math.round((recipients.filter(r => r.opened_at).length / sentRecipients.length) * 100)}%</p>}</div></CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-category-health/10 p-2.5"><MousePointerClick className="h-4 w-4 text-category-health" /></div><div><p className="text-xs text-muted-foreground">Clicked</p><p className="text-lg font-bold font-heading">{recipients.filter(r => r.clicked_at).length}</p>{recipients.length > 0 && sentRecipients.length > 0 && <p className="text-[10px] text-muted-foreground">{Math.round((recipients.filter(r => r.clicked_at).length / sentRecipients.length) * 100)}%</p>}</div></CardContent></Card>
       </div>
 
       {/* Progress bar */}
@@ -391,6 +393,7 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
         <TabsList>
           <TabsTrigger value="overview" className="text-xs"><Mail className="h-3 w-3 mr-1" />Email Content</TabsTrigger>
           <TabsTrigger value="recipients" className="text-xs"><Users className="h-3 w-3 mr-1" />Recipients ({recipients.length})</TabsTrigger>
+          <TabsTrigger value="activity" className="text-xs"><Activity className="h-3 w-3 mr-1" />Activity Log</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
@@ -445,6 +448,8 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                         <TableHead className="text-xs">Source</TableHead>
                         <TableHead className="text-xs">Status</TableHead>
                         <TableHead className="text-xs">Sent</TableHead>
+                        <TableHead className="text-xs">Opened</TableHead>
+                        <TableHead className="text-xs">Clicked</TableHead>
                         {campaign.campaign_type === "sequence" && <TableHead className="text-xs">Step</TableHead>}
                       </TableRow>
                     </TableHeader>
@@ -456,6 +461,8 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                           <TableCell><Badge variant="outline" className="text-[9px]">{r.source === "customer" ? "CRM" : r.source === "csv_import" ? "CSV" : "Manual"}</Badge></TableCell>
                           <TableCell><Badge className={`${RECIPIENT_STATUS_COLORS[r.status] || "bg-muted"} border-0 text-[10px]`}>{r.status}</Badge></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{r.sent_at ? new Date(r.sent_at).toLocaleDateString() : "—"}</TableCell>
+                          <TableCell className="text-xs">{r.opened_at ? <Badge className="bg-category-scheduling/10 text-category-scheduling border-0 text-[9px]">Yes</Badge> : "—"}</TableCell>
+                          <TableCell className="text-xs">{r.clicked_at ? <Badge className="bg-category-health/10 text-category-health border-0 text-[9px]">Yes</Badge> : "—"}</TableCell>
                           {campaign.campaign_type === "sequence" && <TableCell className="text-xs">{r.current_step || 0}/{sequences.length}</TableCell>}
                         </TableRow>
                       ))}
@@ -465,6 +472,10 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="activity" className="mt-4">
+          <CampaignActivityLog campaignId={campaign.id} />
         </TabsContent>
       </Tabs>
 
