@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft, Pencil, Clock, Pause, Play, Send, Eye, Users,
   ChevronDown, ChevronUp, Mail, Layers, UserPlus, Calendar,
-  CalendarClock, Shield, X
+  CalendarClock, Shield, X, MousePointerClick, Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
