@@ -392,6 +392,7 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
         <TabsList>
           <TabsTrigger value="overview" className="text-xs"><Mail className="h-3 w-3 mr-1" />Email Content</TabsTrigger>
           <TabsTrigger value="recipients" className="text-xs"><Users className="h-3 w-3 mr-1" />Recipients ({recipients.length})</TabsTrigger>
+          <TabsTrigger value="activity" className="text-xs"><Activity className="h-3 w-3 mr-1" />Activity Log</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
