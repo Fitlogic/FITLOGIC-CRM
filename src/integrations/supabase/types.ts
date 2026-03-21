@@ -110,6 +110,63 @@ export type Database = {
           },
         ]
       }
+      campaign_send_log: {
+        Row: {
+          campaign_id: string
+          clicked_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          opened_at: string | null
+          recipient_id: string
+          sent_at: string | null
+          status: string
+          step_number: number
+          tracking_id: string | null
+        }
+        Insert: {
+          campaign_id: string
+          clicked_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          opened_at?: string | null
+          recipient_id: string
+          sent_at?: string | null
+          status?: string
+          step_number?: number
+          tracking_id?: string | null
+        }
+        Update: {
+          campaign_id?: string
+          clicked_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          opened_at?: string | null
+          recipient_id?: string
+          sent_at?: string | null
+          status?: string
+          step_number?: number
+          tracking_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_send_log_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_send_log_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_recipients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_sequences: {
         Row: {
           body_html_override: string | null
@@ -154,6 +211,35 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_unsubscribes: {
+        Row: {
+          campaign_id: string | null
+          email: string
+          id: string
+          unsubscribed_at: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          email: string
+          id?: string
+          unsubscribed_at?: string
+        }
+        Update: {
+          campaign_id?: string | null
+          email?: string
+          id?: string
+          unsubscribed_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_unsubscribes_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
             referencedColumns: ["id"]
           },
         ]
