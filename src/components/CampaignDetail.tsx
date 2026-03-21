@@ -472,6 +472,10 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="activity" className="mt-4">
+          <CampaignActivityLog campaignId={campaign.id} />
+        </TabsContent>
       </Tabs>
 
       {/* Schedule info (when already scheduled) */}
