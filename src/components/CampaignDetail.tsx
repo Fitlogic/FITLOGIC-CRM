@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { EmailPreview } from "@/components/EmailPreview";
 import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
 import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus } from "@/lib/types";
+import { CampaignActivityLog } from "@/components/CampaignActivityLog";
 
 interface CampaignRow {
   id: string; name: string; status: string; campaign_type: string;
