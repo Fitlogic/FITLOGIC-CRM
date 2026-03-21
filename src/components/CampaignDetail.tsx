@@ -447,6 +447,8 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                         <TableHead className="text-xs">Source</TableHead>
                         <TableHead className="text-xs">Status</TableHead>
                         <TableHead className="text-xs">Sent</TableHead>
+                        <TableHead className="text-xs">Opened</TableHead>
+                        <TableHead className="text-xs">Clicked</TableHead>
                         {campaign.campaign_type === "sequence" && <TableHead className="text-xs">Step</TableHead>}
                       </TableRow>
                     </TableHeader>
@@ -458,6 +460,8 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                           <TableCell><Badge variant="outline" className="text-[9px]">{r.source === "customer" ? "CRM" : r.source === "csv_import" ? "CSV" : "Manual"}</Badge></TableCell>
                           <TableCell><Badge className={`${RECIPIENT_STATUS_COLORS[r.status] || "bg-muted"} border-0 text-[10px]`}>{r.status}</Badge></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{r.sent_at ? new Date(r.sent_at).toLocaleDateString() : "—"}</TableCell>
+                          <TableCell className="text-xs">{r.opened_at ? <Badge className="bg-category-scheduling/10 text-category-scheduling border-0 text-[9px]">Yes</Badge> : "—"}</TableCell>
+                          <TableCell className="text-xs">{r.clicked_at ? <Badge className="bg-category-health/10 text-category-health border-0 text-[9px]">Yes</Badge> : "—"}</TableCell>
                           {campaign.campaign_type === "sequence" && <TableCell className="text-xs">{r.current_step || 0}/{sequences.length}</TableCell>}
                         </TableRow>
                       ))}
