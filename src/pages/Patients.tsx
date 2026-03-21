@@ -1,21 +1,23 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import {
-  Users, Plus, Search, MoreHorizontal, Mail, Phone, Calendar,
-  Shield, Eye, Pencil, Trash2, ChevronLeft
+  Users, Plus, Search, MoreHorizontal, Mail, Phone, Building2,
+  Eye, Pencil, Trash2, ChevronLeft, ArrowUpDown, Tag, StickyNote,
+  MapPin, DollarSign, TrendingUp, Clock, Send, ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -24,6 +26,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Separator } from "@/components/ui/separator";
 import { PatientForm, type PatientFormData } from "@/components/PatientForm";
 import { PatientTimeline } from "@/components/PatientTimeline";
 
@@ -48,10 +51,19 @@ type Patient = {
   updated_at: string;
 };
 
-const statusColor: Record<string, string> = {
-  active: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
-  inactive: "bg-amber-500/10 text-amber-700 border-amber-200",
-  archived: "bg-muted text-muted-foreground border-border",
+const STATUS_MAP: Record<string, { label: string; color: string; dot: string }> = {
+  active: { label: "Active Lead", color: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
+  inactive: { label: "Cold", color: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
+  archived: { label: "Closed", color: "bg-muted text-muted-foreground border-border", dot: "bg-muted-foreground" },
+};
+
+const LEAD_SOURCE_MAP: Record<string, { label: string; color: string }> = {
+  referral: { label: "Referral", color: "bg-blue-50 text-blue-700" },
+  "cold-outreach": { label: "Cold Outreach", color: "bg-purple-50 text-purple-700" },
+  inbound: { label: "Inbound", color: "bg-green-50 text-green-700" },
+  event: { label: "Event", color: "bg-orange-50 text-orange-700" },
+  social: { label: "Social Media", color: "bg-pink-50 text-pink-700" },
+  other: { label: "Other", color: "bg-muted text-muted-foreground" },
 };
 
 function formatDate(d: string | null) {
@@ -59,17 +71,50 @@ function formatDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function relativeDate(d: string) {
+  const diff = Date.now() - new Date(d).getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return formatDate(d);
+}
+
 function initials(f: string, l: string) {
   return `${f[0] || ""}${l[0] || ""}`.toUpperCase();
+}
+
+function StatusPill({ status }: { status: string }) {
+  const config = STATUS_MAP[status] || STATUS_MAP.active;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium border ${config.color}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
+      {config.label}
+    </span>
+  );
+}
+
+function LeadSourceBadge({ source }: { source: string | null }) {
+  if (!source) return <span className="text-xs text-muted-foreground">—</span>;
+  const config = LEAD_SOURCE_MAP[source] || LEAD_SOURCE_MAP.other;
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${config.color}`}>
+      {config.label}
+    </span>
+  );
 }
 
 export default function Patients() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"newest" | "name" | "company">("newest");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Patient | null>(null);
   const [viewing, setViewing] = useState<Patient | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Patient | null>(null);
+  const [detailTab, setDetailTab] = useState("overview");
 
   const { data: patients = [], isLoading } = useQuery({
     queryKey: ["patients"],
@@ -83,33 +128,41 @@ export default function Patients() {
     },
   });
 
+  // Campaign participation query for detail view
+  const { data: contactCampaigns = [] } = useQuery({
+    queryKey: ["contact-campaigns", viewing?.id],
+    enabled: !!viewing,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_recipients")
+        .select("id, status, sent_at, opened_at, clicked_at, current_step, campaign_id, campaigns(name, status)")
+        .eq("patient_id", viewing!.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   const parseTags = (t: string) => t ? t.split(",").map(s => s.trim()).filter(Boolean) : [];
 
   const addMutation = useMutation({
     mutationFn: async (form: PatientFormData) => {
       const { error } = await supabase.from("patients").insert({
-        first_name: form.first_name,
-        last_name: form.last_name,
-        email: form.email || null,
-        phone: form.phone || null,
-        date_of_birth: form.date_of_birth || null,
-        gender: form.gender || null,
-        address: form.address || null,
-        city: form.city || null,
-        state: form.state || null,
-        zip_code: form.zip_code || null,
+        first_name: form.first_name, last_name: form.last_name,
+        email: form.email || null, phone: form.phone || null,
+        date_of_birth: form.date_of_birth || null, gender: form.gender || null,
+        address: form.address || null, city: form.city || null,
+        state: form.state || null, zip_code: form.zip_code || null,
         insurance_provider: form.insurance_provider || null,
         insurance_id: form.insurance_id || null,
-        status: form.status,
-        tags: parseTags(form.tags),
-        notes: form.notes || null,
+        status: form.status, tags: parseTags(form.tags), notes: form.notes || null,
       });
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
       setFormOpen(false);
-      toast({ title: "Contact added" });
+      toast({ title: "Contact added successfully" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -117,30 +170,21 @@ export default function Patients() {
   const updateMutation = useMutation({
     mutationFn: async ({ id, form }: { id: string; form: PatientFormData }) => {
       const { data, error } = await supabase.from("patients").update({
-        first_name: form.first_name,
-        last_name: form.last_name,
-        email: form.email || null,
-        phone: form.phone || null,
-        date_of_birth: form.date_of_birth || null,
-        gender: form.gender || null,
-        address: form.address || null,
-        city: form.city || null,
-        state: form.state || null,
-        zip_code: form.zip_code || null,
+        first_name: form.first_name, last_name: form.last_name,
+        email: form.email || null, phone: form.phone || null,
+        date_of_birth: form.date_of_birth || null, gender: form.gender || null,
+        address: form.address || null, city: form.city || null,
+        state: form.state || null, zip_code: form.zip_code || null,
         insurance_provider: form.insurance_provider || null,
         insurance_id: form.insurance_id || null,
-        status: form.status,
-        tags: parseTags(form.tags),
-        notes: form.notes || null,
+        status: form.status, tags: parseTags(form.tags), notes: form.notes || null,
       }).eq("id", id).select().single();
       if (error) throw error;
       return data as Patient;
     },
     onSuccess: (updatedPatient) => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
-      if (viewing && viewing.id === updatedPatient.id) {
-        setViewing(updatedPatient);
-      }
+      if (viewing && viewing.id === updatedPatient.id) setViewing(updatedPatient);
       setEditing(null);
       setFormOpen(false);
       toast({ title: "Contact updated" });
@@ -162,111 +206,284 @@ export default function Patients() {
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const filtered = patients.filter((p) => {
-    const q = search.toLowerCase();
-    return (
-      p.first_name.toLowerCase().includes(q) ||
-      p.last_name.toLowerCase().includes(q) ||
-      (p.email?.toLowerCase().includes(q) ?? false) ||
-      (p.phone?.includes(q) ?? false)
-    );
-  });
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: patients.length, active: 0, inactive: 0, archived: 0 };
+    patients.forEach(p => { counts[p.status] = (counts[p.status] || 0) + 1; });
+    return counts;
+  }, [patients]);
 
-  // Detail view
+  const filtered = useMemo(() => {
+    let result = patients;
+    if (statusFilter !== "all") result = result.filter(p => p.status === statusFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(p =>
+        p.first_name.toLowerCase().includes(q) || p.last_name.toLowerCase().includes(q) ||
+        (p.email?.toLowerCase().includes(q) ?? false) || (p.phone?.includes(q) ?? false) ||
+        (p.insurance_provider?.toLowerCase().includes(q) ?? false)
+      );
+    }
+    if (sortBy === "name") result = [...result].sort((a, b) => a.first_name.localeCompare(b.first_name));
+    else if (sortBy === "company") result = [...result].sort((a, b) => (a.insurance_provider || "").localeCompare(b.insurance_provider || ""));
+    return result;
+  }, [patients, statusFilter, search, sortBy]);
+
+  // ─── DETAIL VIEW ───
   if (viewing) {
     const p = viewing;
     return (
       <div className="space-y-6">
-        <Button variant="ghost" size="sm" onClick={() => setViewing(null)} className="gap-1">
-          <ChevronLeft className="h-4 w-4" /> Back to contacts
-        </Button>
+        {/* Header */}
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => { setViewing(null); setDetailTab("overview"); }} className="gap-1 text-muted-foreground hover:text-foreground">
+            <ChevronLeft className="h-4 w-4" /> Contacts
+          </Button>
+        </div>
 
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
-            <Avatar className="h-16 w-16 text-lg">
-              <AvatarFallback className="gradient-brand text-primary-foreground font-heading">
+            <Avatar className="h-14 w-14 text-lg shadow-elevated">
+              <AvatarFallback className="gradient-brand text-primary-foreground font-heading text-lg">
                 {initials(p.first_name, p.last_name)}
               </AvatarFallback>
             </Avatar>
-            <div>
+            <div className="space-y-1">
               <h1 className="font-heading text-2xl font-bold text-foreground">
                 {p.first_name} {p.last_name}
               </h1>
-              <Badge variant="outline" className={statusColor[p.status]}>{p.status}</Badge>
+              <div className="flex items-center gap-2">
+                <StatusPill status={p.status} />
+                <LeadSourceBadge source={p.gender} />
+                {p.insurance_provider && (
+                  <span className="text-sm text-muted-foreground flex items-center gap-1">
+                    <Building2 className="h-3.5 w-3.5" /> {p.insurance_provider}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex gap-2">
+            {p.email && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={`mailto:${p.email}`}><Mail className="h-3.5 w-3.5 mr-1" /> Email</a>
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => { setEditing(p); setFormOpen(true); }}>
               <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
             </Button>
-            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleteTarget(p)}>
-              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-9 w-9">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(p)}>
+                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Contact
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Contact Information</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Mail className="h-4 w-4" /> {p.email || "—"}
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Phone className="h-4 w-4" /> {p.phone || "—"}
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Calendar className="h-4 w-4" /> Lead Source: {p.gender || "—"}
-              </div>
-              <p className="text-muted-foreground">
-                {[p.address, p.city, p.state, p.zip_code].filter(Boolean).join(", ") || "No address on file"}
+        {/* Quick stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card className="shadow-card">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-heading font-bold text-foreground">{p.insurance_id || "—"}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Deal Value</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-card">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-heading font-bold text-foreground">{contactCampaigns.length}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Campaigns</p>
+            </CardContent>
+          </Card>
+          <Card className="shadow-card">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-heading font-bold text-foreground">
+                {contactCampaigns.filter((c: any) => c.opened_at).length}
               </p>
+              <p className="text-xs text-muted-foreground mt-0.5">Emails Opened</p>
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader><CardTitle className="text-base">Company & Deal</CardTitle></CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Shield className="h-4 w-4" /> {p.insurance_provider || "No company"}
-              </div>
-              <p className="text-muted-foreground">Deal Value: {p.insurance_id || "—"}</p>
+          <Card className="shadow-card">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-heading font-bold text-foreground">{relativeDate(p.created_at)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Added</p>
             </CardContent>
           </Card>
+        </div>
 
-          {(p.notes || (p.tags && p.tags.length > 0)) && (
-            <Card className="md:col-span-2">
-              <CardHeader><CardTitle className="text-base">Notes & Tags</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                {p.tags && p.tags.length > 0 && (
+        {/* Tabs */}
+        <Tabs value={detailTab} onValueChange={setDetailTab}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
+            <TabsTrigger value="campaigns">Campaigns ({contactCampaigns.length})</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="mt-4 space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <Card className="shadow-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-primary" /> Contact Details
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Email</span>
+                    <span className="font-medium">{p.email || "—"}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Phone</span>
+                    <span className="font-medium">{p.phone || "—"}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Lead Source</span>
+                    <LeadSourceBadge source={p.gender} />
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Location</span>
+                    <span className="font-medium text-right">
+                      {[p.city, p.state].filter(Boolean).join(", ") || "—"}
+                    </span>
+                  </div>
+                  {p.address && (
+                    <>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Address</span>
+                        <span className="font-medium text-right text-xs">{p.address}{p.zip_code ? `, ${p.zip_code}` : ""}</span>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="shadow-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-primary" /> Company & Deal
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Company</span>
+                    <span className="font-medium">{p.insurance_provider || "—"}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Deal Value</span>
+                    <span className="font-medium font-heading text-foreground">{p.insurance_id || "—"}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Status</span>
+                    <StatusPill status={p.status} />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Tags */}
+            {p.tags && p.tags.length > 0 && (
+              <Card className="shadow-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Tag className="h-4 w-4 text-primary" /> Tags
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
                   <div className="flex flex-wrap gap-1.5">
                     {p.tags.map((tag) => (
                       <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Notes */}
+            <Card className="shadow-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <StickyNote className="h-4 w-4 text-primary" /> Notes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {p.notes ? (
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{p.notes}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground italic">No notes yet. Click Edit to add notes.</p>
                 )}
-                {p.notes && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{p.notes}</p>}
               </CardContent>
             </Card>
-          )}
 
-          <Card className="md:col-span-2">
-            <CardHeader><CardTitle className="text-base">Activity Timeline</CardTitle></CardHeader>
-            <CardContent>
-              <PatientTimeline patientId={p.id} />
-            </CardContent>
-          </Card>
+            {/* Record info */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2">
+              <span>Created {formatDate(p.created_at)}</span>
+              <span>·</span>
+              <span>Updated {formatDate(p.updated_at)}</span>
+            </div>
+          </TabsContent>
 
-          <Card className="md:col-span-2">
-            <CardHeader><CardTitle className="text-base">Record Info</CardTitle></CardHeader>
-            <CardContent className="text-xs text-muted-foreground space-y-1">
-              <p>Created: {formatDate(p.created_at)}</p>
-              <p>Last updated: {formatDate(p.updated_at)}</p>
-              <p className="font-mono">ID: {p.id}</p>
-            </CardContent>
-          </Card>
-        </div>
+          <TabsContent value="activity" className="mt-4">
+            <Card className="shadow-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">Activity Timeline</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PatientTimeline patientId={p.id} />
+              </CardContent>
+            </Card>
+          </TabsContent>
 
+          <TabsContent value="campaigns" className="mt-4 space-y-3">
+            {contactCampaigns.length === 0 ? (
+              <Card className="shadow-card">
+                <CardContent className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Send className="h-8 w-8 mb-2 opacity-40" />
+                  <p className="text-sm font-medium">Not in any campaigns yet</p>
+                  <p className="text-xs mt-1">Add this contact to a campaign from the Campaigns page</p>
+                </CardContent>
+              </Card>
+            ) : (
+              contactCampaigns.map((cr: any) => (
+                <Card key={cr.id} className="shadow-card">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{cr.campaigns?.name || "Unknown Campaign"}</p>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                          <span>Step {cr.current_step || 1}</span>
+                          <span>·</span>
+                          <span className="capitalize">{cr.status}</span>
+                          {cr.sent_at && <><span>·</span><span>Sent {relativeDate(cr.sent_at)}</span></>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {cr.opened_at && (
+                          <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700">Opened</Badge>
+                        )}
+                        {cr.clicked_at && (
+                          <Badge variant="secondary" className="text-xs bg-blue-50 text-blue-700">Clicked</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* Delete Dialog */}
         <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -277,10 +494,7 @@ export default function Patients() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-              >
+              <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}>
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -290,82 +504,132 @@ export default function Patients() {
     );
   }
 
-  // List view
+  // ─── LIST VIEW ───
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-heading text-2xl font-bold text-foreground">Contacts</h1>
-          <p className="text-sm text-muted-foreground">
-            {patients.length} contact{patients.length !== 1 ? "s" : ""} in your pipeline
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Manage your sales pipeline · {patients.length} contact{patients.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button onClick={() => { setEditing(null); setFormOpen(true); }} className="gap-1.5">
+        <Button onClick={() => { setEditing(null); setFormOpen(true); }} className="gap-1.5 shadow-card">
           <Plus className="h-4 w-4" /> Add Contact
         </Button>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search contacts..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-        />
+      {/* Filters bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center bg-card border rounded-lg p-0.5 shadow-card">
+          {[
+            { key: "all", label: "All" },
+            { key: "active", label: "Active" },
+            { key: "inactive", label: "Cold" },
+            { key: "archived", label: "Closed" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setStatusFilter(f.key)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                statusFilter === f.key
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f.label}
+              <span className="ml-1.5 opacity-70">{statusCounts[f.key] || 0}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, email, company..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 h-9"
+          />
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5 h-9">
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              {sortBy === "newest" ? "Newest" : sortBy === "name" ? "Name" : "Company"}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setSortBy("newest")}>Newest First</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSortBy("name")}>By Name</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSortBy("company")}>By Company</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      <Card>
+      {/* Table */}
+      <Card className="shadow-card overflow-hidden">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading contacts…</div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
-              <Users className="h-8 w-8 mb-2 opacity-40" />
-              <p className="text-sm">{search ? "No contacts match your search" : "No contacts yet — add your first one"}</p>
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-3">
+                <Users className="h-6 w-6 opacity-40" />
+              </div>
+              <p className="text-sm font-medium">{search || statusFilter !== "all" ? "No contacts match your filters" : "No contacts yet"}</p>
+              <p className="text-xs mt-1">{!search && statusFilter === "all" ? "Add your first contact to get started" : "Try adjusting your search or filters"}</p>
+              {!search && statusFilter === "all" && (
+                <Button size="sm" className="mt-4" onClick={() => { setEditing(null); setFormOpen(true); }}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Contact
+                </Button>
+              )}
             </div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Email / Phone</TableHead>
-                  <TableHead>Company</TableHead>
-                  <TableHead>Status</TableHead>
+                <TableRow className="bg-muted/30">
+                  <TableHead className="font-medium">Contact</TableHead>
+                  <TableHead className="font-medium">Email</TableHead>
+                  <TableHead className="font-medium">Company</TableHead>
+                  <TableHead className="font-medium">Lead Source</TableHead>
+                  <TableHead className="font-medium">Deal Value</TableHead>
+                  <TableHead className="font-medium">Status</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((p) => (
-                  <TableRow key={p.id} className="cursor-pointer" onClick={() => setViewing(p)}>
+                  <TableRow key={p.id} className="cursor-pointer group" onClick={() => setViewing(p)}>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <Avatar className="h-8 w-8 text-xs">
+                        <Avatar className="h-9 w-9 text-xs shadow-sm">
                           <AvatarFallback className="gradient-brand text-primary-foreground font-heading">
                             {initials(p.first_name, p.last_name)}
                           </AvatarFallback>
                         </Avatar>
                         <div>
-                          <p className="font-medium text-foreground">{p.first_name} {p.last_name}</p>
-                          <p className="text-xs text-muted-foreground">Added {formatDate(p.created_at)}</p>
+                          <p className="font-medium text-foreground group-hover:text-primary transition-colors">
+                            {p.first_name} {p.last_name}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">{relativeDate(p.created_at)}</p>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      <div>{p.email || "—"}</div>
-                      <div className="text-xs">{p.phone || ""}</div>
+                    <TableCell className="text-sm">
+                      <div className="text-muted-foreground">{p.email || "—"}</div>
+                      {p.phone && <div className="text-[11px] text-muted-foreground/70">{p.phone}</div>}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {p.insurance_provider || "—"}
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant="outline" className={statusColor[p.status]}>{p.status}</Badge>
-                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{p.insurance_provider || "—"}</TableCell>
+                    <TableCell><LeadSourceBadge source={p.gender} /></TableCell>
+                    <TableCell className="text-sm font-medium font-heading">{p.insurance_id || "—"}</TableCell>
+                    <TableCell><StatusPill status={p.status} /></TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -376,6 +640,7 @@ export default function Patients() {
                           <DropdownMenuItem onClick={() => { setEditing(p); setFormOpen(true); }}>
                             <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
                           </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(p)}>
                             <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
                           </DropdownMenuItem>
@@ -390,38 +655,35 @@ export default function Patients() {
         </CardContent>
       </Card>
 
+      {/* Summary */}
+      {filtered.length > 0 && (
+        <p className="text-xs text-muted-foreground text-center">
+          Showing {filtered.length} of {patients.length} contacts
+        </p>
+      )}
+
       {/* Add/Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditing(null); } }}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Contact" : "Add New Contact"}</DialogTitle>
             <DialogDescription>
-              {editing ? "Update contact information below." : "Enter contact details to add to your pipeline."}
+              {editing ? "Update contact details below." : "Fill in the details to add a new contact to your pipeline."}
             </DialogDescription>
           </DialogHeader>
           <PatientForm
             defaultValues={editing ? {
-              first_name: editing.first_name,
-              last_name: editing.last_name,
-              email: editing.email || "",
-              phone: editing.phone || "",
-              date_of_birth: editing.date_of_birth || "",
-              gender: editing.gender || "",
-              address: editing.address || "",
-              city: editing.city || "",
-              state: editing.state || "",
-              zip_code: editing.zip_code || "",
+              first_name: editing.first_name, last_name: editing.last_name,
+              email: editing.email || "", phone: editing.phone || "",
+              date_of_birth: editing.date_of_birth || "", gender: editing.gender || "",
+              address: editing.address || "", city: editing.city || "",
+              state: editing.state || "", zip_code: editing.zip_code || "",
               insurance_provider: editing.insurance_provider || "",
               insurance_id: editing.insurance_id || "",
-              status: editing.status,
-              tags: (editing.tags || []).join(", "),
+              status: editing.status, tags: (editing.tags || []).join(", "),
               notes: editing.notes || "",
             } : undefined}
-            onSubmit={(data) =>
-              editing
-                ? updateMutation.mutate({ id: editing.id, form: data })
-                : addMutation.mutate(data)
-            }
+            onSubmit={(data) => editing ? updateMutation.mutate({ id: editing.id, form: data }) : addMutation.mutate(data)}
             onCancel={() => { setFormOpen(false); setEditing(null); }}
             isSubmitting={addMutation.isPending || updateMutation.isPending}
           />
@@ -432,17 +694,14 @@ export default function Patients() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-              <AlertDialogTitle>Delete Contact</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} from your pipeline.
+            <AlertDialogTitle>Delete Contact</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove {deleteTarget?.first_name} {deleteTarget?.last_name} from your pipeline.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-            >
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
