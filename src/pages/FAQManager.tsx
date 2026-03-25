@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Pencil, Trash2, Search, ToggleLeft, ToggleRight, Filter } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ToggleLeft, ToggleRight, Sparkles, ChevronDown, ChevronRight, MessageSquare, Zap, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import type { InquiryCategory } from "@/lib/types";
+import { CATEGORY_CONFIG, type InquiryCategory } from "@/lib/types";
 
 interface FaqRow {
   id: string;
@@ -32,16 +32,18 @@ const CATEGORIES: InquiryCategory[] = [
 const FAQManager = () => {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [activeTab, setActiveTab] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFaq, setEditingFaq] = useState<FaqRow | null>(null);
   const [deletingFaqId, setDeletingFaqId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [form, setForm] = useState({ question: "", answer: "", category: "General_Info" as InquiryCategory });
+  const [aiGenerating, setAiGenerating] = useState(false);
 
   const { data: faqs = [] } = useQuery({
     queryKey: ["faqs"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("faqs").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("faqs").select("*").order("category", { ascending: true });
       if (error) throw error;
       return data as FaqRow[];
     },
@@ -87,7 +89,7 @@ const FAQManager = () => {
 
   const filtered = faqs.filter((f) => {
     if (search && !f.question.toLowerCase().includes(search.toLowerCase()) && !f.answer.toLowerCase().includes(search.toLowerCase())) return false;
-    if (categoryFilter !== "all" && f.category !== categoryFilter) return false;
+    if (activeTab !== "all" && f.category !== activeTab) return false;
     return true;
   });
 
@@ -99,66 +101,202 @@ const FAQManager = () => {
     upsertMutation.mutate({ id: editingFaq?.id, ...form });
   };
 
+  const handleAiGenerate = async () => {
+    if (!form.question.trim()) { toast.error("Enter a question first"); return; }
+    setAiGenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-faq-answer", {
+        body: { question: form.question, category: form.category },
+      });
+      if (error) throw error;
+      if (data?.answer) {
+        setForm(prev => ({ ...prev, answer: data.answer }));
+        toast.success("AI generated an answer — review and edit as needed");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate answer");
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
   const activeCount = faqs.filter(f => f.active).length;
+  const categoryCounts = CATEGORIES.reduce((acc, cat) => {
+    acc[cat] = faqs.filter(f => f.category === cat).length;
+    return acc;
+  }, {} as Record<string, number>);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="font-heading text-2xl font-bold">FAQ Manager</h1>
-          <p className="text-sm text-muted-foreground mt-1">{faqs.length} FAQs · {activeCount} active · Manage auto-responses for common patient inquiries</p>
+          <h1 className="font-heading text-2xl font-bold">FAQ Knowledge Base</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Auto-respond to common inquiries · AI-powered answers grounded in your business
+          </p>
         </div>
-        <Button onClick={openNew} className="gap-1.5 gradient-brand text-primary-foreground"><Plus className="h-4 w-4" />Add FAQ</Button>
+        <Button onClick={openNew} className="gap-1.5 gradient-brand text-primary-foreground">
+          <Plus className="h-4 w-4" />Add FAQ
+        </Button>
       </div>
 
-      <div className="flex items-center gap-2 mb-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search FAQs..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
-        </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-[170px]"><Filter className="h-3.5 w-3.5 mr-1" /><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {CATEGORIES.map((c) => (<SelectItem key={c} value={c}>{c.replace(/_/g, " ")}</SelectItem>))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-3">
-        {filtered.map((faq) => (
-          <div key={faq.id} className={`rounded-lg border bg-card p-4 shadow-card transition-opacity ${!faq.active ? "opacity-50" : ""}`}>
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-sm">{faq.question}</h3>
-                <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line line-clamp-3">{faq.answer}</p>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <CategoryBadge category={faq.category as InquiryCategory} />
-                <button onClick={() => toggleMutation.mutate({ id: faq.id, active: !faq.active })} className="p-1.5 hover:bg-accent rounded-md transition-colors">
-                  {faq.active ? <ToggleRight className="h-4 w-4 text-category-health" /> : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
-                </button>
-                <button onClick={() => openEdit(faq)} className="p-1.5 hover:bg-accent rounded-md transition-colors"><Pencil className="h-3.5 w-3.5 text-muted-foreground" /></button>
-                <button onClick={() => setDeletingFaqId(faq.id)} className="p-1.5 hover:bg-destructive/10 rounded-md transition-colors"><Trash2 className="h-3.5 w-3.5 text-destructive" /></button>
-              </div>
-            </div>
+      {/* Stats cards */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="rounded-lg border bg-card p-4 shadow-card">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs font-medium mb-1">
+            <BookOpen className="h-3.5 w-3.5" />Total FAQs
           </div>
-        ))}
-        {filtered.length === 0 && <p className="text-center text-sm text-muted-foreground py-8">No FAQs found</p>}
+          <p className="text-2xl font-bold">{faqs.length}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4 shadow-card">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs font-medium mb-1">
+            <Zap className="h-3.5 w-3.5" />Active Auto-Responses
+          </div>
+          <p className="text-2xl font-bold text-category-health">{activeCount}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-4 shadow-card">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs font-medium mb-1">
+            <MessageSquare className="h-3.5 w-3.5" />Categories Covered
+          </div>
+          <p className="text-2xl font-bold">{Object.values(categoryCounts).filter(c => c > 0).length}/{CATEGORIES.length}</p>
+        </div>
       </div>
 
+      {/* Category tabs */}
+      <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
+        <button
+          onClick={() => setActiveTab("all")}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
+            activeTab === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          All ({faqs.length})
+        </button>
+        {CATEGORIES.map(cat => {
+          const config = CATEGORY_CONFIG[cat];
+          return (
+            <button
+              key={cat}
+              onClick={() => setActiveTab(cat)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
+                activeTab === cat ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {config.label} ({categoryCounts[cat] || 0})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input placeholder="Search questions and answers..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+      </div>
+
+      {/* FAQ list */}
+      <div className="space-y-2">
+        {filtered.map((faq) => {
+          const isExpanded = expandedId === faq.id;
+          return (
+            <div
+              key={faq.id}
+              className={`rounded-lg border bg-card shadow-card transition-all ${!faq.active ? "opacity-50" : ""}`}
+            >
+              <div
+                className="flex items-center gap-3 p-4 cursor-pointer"
+                onClick={() => setExpandedId(isExpanded ? null : faq.id)}
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                }
+                <h3 className="font-medium text-sm flex-1 min-w-0">{faq.question}</h3>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <CategoryBadge category={faq.category as InquiryCategory} />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: faq.id, active: !faq.active }); }}
+                    className="p-1.5 hover:bg-accent rounded-md transition-colors"
+                  >
+                    {faq.active ? <ToggleRight className="h-4 w-4 text-category-health" /> : <ToggleLeft className="h-4 w-4 text-muted-foreground" />}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEdit(faq); }}
+                    className="p-1.5 hover:bg-accent rounded-md transition-colors"
+                  >
+                    <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeletingFaqId(faq.id); }}
+                    className="p-1.5 hover:bg-destructive/10 rounded-md transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </button>
+                </div>
+              </div>
+              {isExpanded && (
+                <div className="px-4 pb-4 pl-11">
+                  <div className="bg-muted/50 rounded-md p-3 text-sm text-muted-foreground whitespace-pre-line">
+                    {faq.answer}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="text-center py-12">
+            <MessageSquare className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+            <p className="text-sm text-muted-foreground">No FAQs found</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={openNew}>
+              <Plus className="h-3.5 w-3.5 mr-1" />Add your first FAQ
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editingFaq ? "Edit FAQ" : "New FAQ"}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
-            <div><Label>Question</Label><Input value={form.question} onChange={(e) => setForm({ ...form, question: e.target.value })} placeholder="e.g. What are your office hours?" /></div>
-            <div><Label>Answer</Label><Textarea value={form.answer} onChange={(e) => setForm({ ...form, answer: e.target.value })} placeholder="The response patients will receive..." className="min-h-[120px]" /></div>
+            <div>
+              <Label>Question</Label>
+              <Input value={form.question} onChange={(e) => setForm({ ...form, question: e.target.value })} placeholder="e.g. How much does a consultation cost?" />
+            </div>
             <div>
               <Label>Category</Label>
               <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as InquiryCategory })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{CATEGORIES.map((c) => (<SelectItem key={c} value={c}>{c.replace(/_/g, " ")}</SelectItem>))}</SelectContent>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>{CATEGORY_CONFIG[c].label}</SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label>Answer</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={handleAiGenerate}
+                  disabled={aiGenerating || !form.question.trim()}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {aiGenerating ? "Generating..." : "AI Generate"}
+                </Button>
+              </div>
+              <Textarea
+                value={form.answer}
+                onChange={(e) => setForm({ ...form, answer: e.target.value })}
+                placeholder="The response clients will receive..."
+                className="min-h-[150px]"
+              />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
@@ -168,6 +306,7 @@ const FAQManager = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Delete confirmation */}
       <AlertDialog open={!!deletingFaqId} onOpenChange={(open) => !open && setDeletingFaqId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
