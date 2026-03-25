@@ -1,4 +1,4 @@
-import { LayoutDashboard, Mail, Users, ClipboardList, FileText, Share2, Settings, BarChart3, ExternalLink, Inbox } from "lucide-react";
+import { LayoutDashboard, Mail, Users, ClipboardList, FileText, Share2, Settings, BarChart3, ExternalLink, Inbox, Tent } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import logo from "@/assets/fitlogic-logo.png";
@@ -74,6 +74,14 @@ export function AppSidebar() {
                   <a href="https://moilapp.com/marketing" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
                     <ExternalLink className="h-4 w-4" />
                     {!collapsed && <span>Marketing</span>}
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <a href="/retreat/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
+                    <Tent className="h-4 w-4" />
+                    {!collapsed && <span>The Retreat</span>}
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>
