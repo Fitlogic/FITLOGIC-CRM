@@ -193,6 +193,11 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
                   Escalate
                 </Button>
               )}
+
+              <Button variant="secondary" size="sm" onClick={handleClassify} disabled={classifying} className="gap-1.5">
+                {classifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                AI Classify
+              </Button>
             </div>
 
             <div>
