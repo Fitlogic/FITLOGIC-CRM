@@ -547,6 +547,39 @@ export type Database = {
           },
         ]
       }
+      knowledge_chunks: {
+        Row: {
+          category: string
+          content: string
+          created_at: string | null
+          document_name: string
+          id: string
+          section_title: string
+          tags: string[] | null
+          token_estimate: number | null
+        }
+        Insert: {
+          category?: string
+          content: string
+          created_at?: string | null
+          document_name: string
+          id?: string
+          section_title: string
+          tags?: string[] | null
+          token_estimate?: number | null
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string | null
+          document_name?: string
+          id?: string
+          section_title?: string
+          tags?: string[] | null
+          token_estimate?: number | null
+        }
+        Relationships: []
+      }
       patients: {
         Row: {
           address: string | null
