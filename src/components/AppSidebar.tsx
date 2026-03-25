@@ -19,6 +19,7 @@ import {
 
 const mainItems = [
   { title: "Pipeline", url: "/", icon: LayoutDashboard },
+  { title: "Inbox", url: "/inbox", icon: Inbox },
   { title: "Campaigns", url: "/campaigns", icon: Mail },
   { title: "Contacts", url: "/contacts", icon: Users },
   { title: "Lead Forms", url: "/forms", icon: ClipboardList },

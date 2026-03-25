@@ -26,6 +26,7 @@ const App = () => (
         <Layout>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/inbox" element={<Inbox />} />
             <Route path="/faqs" element={<FAQManager />} />
             <Route path="/forms" element={<IntakeForms />} />
             <Route path="/intake" element={<Navigate to="/forms" replace />} />
