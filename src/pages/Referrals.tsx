@@ -102,9 +102,9 @@ const Referrals = () => {
 
   const filtered = referrals.filter(
     (r) =>
-      r.referrer_name.toLowerCase().includes(search.toLowerCase()) ||
-      r.referrer_email.toLowerCase().includes(search.toLowerCase()) ||
-      r.referral_code.toLowerCase().includes(search.toLowerCase())
+      (r.referrer_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.referrer_email || "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.referral_code || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const totalReferrals = referrals.length;
