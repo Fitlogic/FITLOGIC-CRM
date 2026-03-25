@@ -87,11 +87,11 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            <SelectItem value="Appointment_Scheduling">Scheduling</SelectItem>
-            <SelectItem value="Health_Questions">Health</SelectItem>
-            <SelectItem value="Prescription_Lab_Requests">Rx / Labs</SelectItem>
-            <SelectItem value="Billing_Insurance">Billing</SelectItem>
-            <SelectItem value="Urgent_Red_Flags">Urgent</SelectItem>
+            <SelectItem value="Appointment_Scheduling">Consultations</SelectItem>
+            <SelectItem value="Health_Questions">Results & Outcomes</SelectItem>
+            <SelectItem value="Prescription_Lab_Requests">Services & Programs</SelectItem>
+            <SelectItem value="Billing_Insurance">Pricing & Payment</SelectItem>
+            <SelectItem value="Urgent_Red_Flags">Urgent / Escalation</SelectItem>
             <SelectItem value="General_Info">General</SelectItem>
           </SelectContent>
         </Select>
