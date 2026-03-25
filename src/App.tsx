@@ -13,6 +13,7 @@ import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Referrals from "./pages/Referrals";
 import Inbox from "./pages/Inbox";
+import Retreat from "./pages/Retreat";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,6 +37,7 @@ const App = () => (
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/referrals" element={<Referrals />} />
+            <Route path="/retreat" element={<Retreat />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Layout>
