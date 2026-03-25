@@ -500,6 +500,35 @@ export default function Patients() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Add/Edit Dialog (must render inside detail view too) */}
+        <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditing(null); } }}>
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle>{editing ? "Edit Contact" : "Add New Contact"}</DialogTitle>
+              <DialogDescription>
+                {editing ? "Update contact details below." : "Fill in the details to add a new contact to your pipeline."}
+              </DialogDescription>
+            </DialogHeader>
+            <PatientForm
+              key={editing?.id || "new"}
+              defaultValues={editing ? {
+                first_name: editing.first_name, last_name: editing.last_name,
+                email: editing.email || "", phone: editing.phone || "",
+                date_of_birth: editing.date_of_birth || "", gender: editing.gender || "",
+                address: editing.address || "", city: editing.city || "",
+                state: editing.state || "", zip_code: editing.zip_code || "",
+                insurance_provider: editing.insurance_provider || "",
+                insurance_id: editing.insurance_id || "",
+                status: editing.status, tags: (editing.tags || []).join(", "),
+                notes: editing.notes || "",
+              } : undefined}
+              onSubmit={(data) => editing ? updateMutation.mutate({ id: editing.id, form: data }) : addMutation.mutate(data)}
+              onCancel={() => { setFormOpen(false); setEditing(null); }}
+              isSubmitting={addMutation.isPending || updateMutation.isPending}
+            />
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
