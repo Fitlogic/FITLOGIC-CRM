@@ -1298,21 +1298,67 @@ function toggleFaq(btn) {
   }
 }
 
-// ---- Form submission ----
-function handleSubmit(e) {
+// ---- Form submission → Supabase Inbox + CRM ----
+const SUPABASE_URL = 'https://dqsdxrsfrsjnqisphwhs.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxc2R4cnNmcnNqbnFpc3Bod2hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1MDEwMDMsImV4cCI6MjA4OTA3NzAwM30.9AQBKNg60evk3-4go9KD7iN7N80FXPbsPSaPl5XK0FE';
+
+async function handleSubmit(e) {
   e.preventDefault();
   const first = document.getElementById('fname').value.trim();
+  const last  = document.getElementById('lname').value.trim();
   const email = document.getElementById('email').value.trim();
+  const phone = document.getElementById('phone').value.trim();
+  const msg   = document.getElementById('msg').value.trim();
+
   if (!first || !email) {
     alert('Please enter your name and email to join the interest list.');
     return;
   }
+
   const btn = document.getElementById('submit-btn');
-  btn.textContent = "✓ You're on the list! Watch your inbox.";
-  btn.style.background = '#4A7A46';
+  btn.textContent = 'Submitting...';
   btn.disabled = true;
-  // TODO: POST to email platform (Brevo / Mailchimp / ConvertKit)
-  console.log('Interest captured:', { first, email });
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Prefer': 'return=minimal'
+  };
+
+  try {
+    // 1. Create or find CRM contact
+    const patientName = first + (last ? ' ' + last : '');
+    await fetch(SUPABASE_URL + '/rest/v1/rpc/find_or_create_patient', {
+      method: 'POST', headers: { ...headers, 'Prefer': undefined },
+      body: JSON.stringify({ p_name: patientName, p_email: email || null })
+    });
+
+    // 2. Create inquiry in Inbox
+    const content = msg
+      ? 'Retreat Interest: ' + msg
+      : 'Interested in Escape & Exhale Retreat (Nov 12-15, 2026)';
+
+    await fetch(SUPABASE_URL + '/rest/v1/inquiries', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        patient_name: patientName,
+        patient_email: email,
+        source: 'portal',
+        category: 'General_Info',
+        raw_content: content + (phone ? '\nPhone: ' + phone : ''),
+        status: 'pending'
+      })
+    });
+
+    btn.textContent = "✓ You're on the list! Watch your inbox.";
+    btn.style.background = '#4A7A46';
+  } catch (err) {
+    console.error('Submit error:', err);
+    btn.textContent = 'Something went wrong — try again';
+    btn.style.background = '#7D3C0A';
+    btn.disabled = false;
+  }
 }
 
 // ---- Real-time field validation ----
