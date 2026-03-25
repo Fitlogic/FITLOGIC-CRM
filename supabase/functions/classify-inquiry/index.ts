@@ -36,9 +36,15 @@ serve(async (req) => {
       .join("\n\n");
 
     // Use Gemini to classify and match
-    const prompt = `You are an AI assistant for a sales/business platform. Analyze this incoming inquiry and:
+    const prompt = `You are an AI assistant for FitLogic, a functional medicine sales and client management platform. Analyze this incoming inquiry and:
 
-1. Classify it into ONE category: Appointment_Scheduling, Prescription_Lab_Requests, Health_Questions, Billing_Insurance, Urgent_Red_Flags, General_Info
+1. Classify it into ONE category:
+   - Appointment_Scheduling (consultations, discovery calls, booking)
+   - Prescription_Lab_Requests (services, programs, lab work, protocols)
+   - Health_Questions (results, outcomes, expectations, success stories)
+   - Billing_Insurance (pricing, payment plans, insurance, HSA/FSA)
+   - Urgent_Red_Flags (urgent health concerns, emergencies, escalations)
+   - General_Info (office hours, location, getting started, referrals)
 2. Rate your confidence (0.0-1.0)
 3. Check if it matches any FAQ below. If yes, provide the FAQ answer.
 4. Determine if this needs human attention or can be auto-responded.
