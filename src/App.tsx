@@ -12,6 +12,7 @@ import Campaigns from "./pages/Campaigns";
 import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Referrals from "./pages/Referrals";
+import Inbox from "./pages/Inbox";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,6 +26,7 @@ const App = () => (
         <Layout>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/inbox" element={<Inbox />} />
             <Route path="/faqs" element={<FAQManager />} />
             <Route path="/forms" element={<IntakeForms />} />
             <Route path="/intake" element={<Navigate to="/forms" replace />} />

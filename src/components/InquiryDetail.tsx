@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Mail, Globe, Phone, PenLine, Clock, User, Send, AlertTriangle, CheckCircle, Bot } from "lucide-react";
+import { Mail, Globe, Phone, PenLine, Clock, User, Send, AlertTriangle, CheckCircle, Bot, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -38,7 +38,26 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
   const [reply, setReply] = useState("");
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [assignedStaffName, setAssignedStaffName] = useState<string | null>(null);
+  const [classifying, setClassifying] = useState(false);
   const SourceIcon = sourceIcons[inquiry.source] || Mail;
+
+  const handleClassify = async () => {
+    setClassifying(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("classify-inquiry", {
+        body: { inquiry_id: inquiry.id },
+      });
+      if (error) throw error;
+      if (data?.updates) {
+        onUpdate(inquiry.id, data.updates);
+        toast.success(data.classification?.is_faq_match ? "AI matched to FAQ and auto-responded" : "AI classified successfully");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Classification failed");
+    } finally {
+      setClassifying(false);
+    }
+  };
 
   useEffect(() => {
     supabase.from("staff").select("id, name, role, active").eq("active", true).then(({ data }) => {
@@ -174,6 +193,11 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
                   Escalate
                 </Button>
               )}
+
+              <Button variant="secondary" size="sm" onClick={handleClassify} disabled={classifying} className="gap-1.5">
+                {classifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                AI Classify
+              </Button>
             </div>
 
             <div>
