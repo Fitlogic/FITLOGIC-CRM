@@ -246,11 +246,11 @@ export const INQUIRIES: Inquiry[] = [
 ];
 
 export const CATEGORY_CONFIG: Record<InquiryCategory, { label: string; color: string; bgColor: string }> = {
-  Appointment_Scheduling: { label: "Scheduling", color: "text-category-scheduling", bgColor: "bg-category-scheduling/10" },
-  Health_Questions: { label: "Health", color: "text-category-health", bgColor: "bg-category-health/10" },
-  Prescription_Lab_Requests: { label: "Rx / Labs", color: "text-category-prescription", bgColor: "bg-category-prescription/10" },
-  Billing_Insurance: { label: "Billing", color: "text-category-billing", bgColor: "bg-category-billing/10" },
-  Urgent_Red_Flags: { label: "Urgent", color: "text-category-urgent", bgColor: "bg-category-urgent/10" },
+  Appointment_Scheduling: { label: "Consultations", color: "text-category-scheduling", bgColor: "bg-category-scheduling/10" },
+  Health_Questions: { label: "Results & Outcomes", color: "text-category-health", bgColor: "bg-category-health/10" },
+  Prescription_Lab_Requests: { label: "Services & Programs", color: "text-category-prescription", bgColor: "bg-category-prescription/10" },
+  Billing_Insurance: { label: "Pricing & Payment", color: "text-category-billing", bgColor: "bg-category-billing/10" },
+  Urgent_Red_Flags: { label: "Urgent / Escalation", color: "text-category-urgent", bgColor: "bg-category-urgent/10" },
   General_Info: { label: "General", color: "text-category-general", bgColor: "bg-category-general/10" },
 };
 
