@@ -434,16 +434,15 @@
 
 <!-- ======================== HERO ======================== -->
 <section id="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
 
   <!-- Floating leaves -->
-  <div aria-hidden="true" id="leaves-wrap">
-    <!-- leaves injected by JS -->
-  </div>
+  <div aria-hidden="true" id="leaves-wrap"></div>
 
   <div class="container">
     <div class="hero-content reveal">
-      <div class="hero-badge">🌿 Women's Wellness Retreat &nbsp;·&nbsp; November 2026</div>
-      <h1>Burnout Recovery &amp; <em>Nervous System Reset</em><br>for Professional Women</h1>
+      <div class="hero-badge">✦ Women's Wellness Retreat &nbsp;·&nbsp; November 2026</div>
+      <h1>Burnout Recovery &amp;<br><em>Nervous System Reset</em><br>for Professional Women</h1>
       <p class="hero-sub">You're successful, capable — and quietly running on empty. Escape &amp; Exhale is a 4-day, science-backed retreat designed for women who are ready to stop pushing through and start healing.</p>
       <div class="hero-details">
         <div class="hero-detail"><span class="hd-icon">📅</span><div><div class="hd-lbl">Dates</div><div class="hd-val">November 12–15, 2026</div></div></div>
@@ -453,108 +452,9 @@
       </div>
       <div class="hero-cta-row">
         <a href="#booking" class="btn btn-primary">Reserve Your Spot →</a>
-        <span class="hero-urgency">⚠️ Spots limited by design</span>
+        <span class="hero-urgency">✦ Spots limited by design</span>
       </div>
     </div>
-  </div>
-
-  <!-- Hill Country Landscape SVG -->
-  <div id="hero-landscape" aria-hidden="true">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 300" preserveAspectRatio="xMidYMax slice">
-      <defs>
-        <linearGradient id="skyFade" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#E8C8A0" stop-opacity="0"/>
-          <stop offset="100%" stop-color="#D4A870" stop-opacity="0.15"/>
-        </linearGradient>
-        <!-- Subtle cloud/haze at horizon -->
-        <filter id="haze"><feGaussianBlur stdDeviation="3"/></filter>
-      </defs>
-
-      <!-- Distant hills — pale blue-sage mist -->
-      <path d="M-10,195 C180,168 360,155 560,168 C760,181 960,152 1160,164 C1320,173 1400,178 1450,175 L1450,300 L-10,300 Z" fill="#B4C8B0" opacity="0.4" filter="url(#haze)"/>
-
-      <!-- Mid hills — sage -->
-      <path d="M-10,218 C120,195 280,180 460,192 C640,204 820,175 1020,188 C1200,200 1350,188 1450,193 L1450,300 L-10,300 Z" fill="#80A87A" opacity="0.75"/>
-
-      <!-- Cypress trees in mid-ground (amber/rust — November fall color) -->
-      <!-- Cypress 1 -->
-      <g transform="translate(350,214)">
-        <path d="M0,-52 C4,-46 9,-32 8,-18 C9,-4 7,10 4,18 C2,22 -2,22 -4,18 C-7,10 -9,-4 -8,-18 C-9,-32 -4,-46 0,-52 Z" fill="#9A6830" opacity="0.75"/>
-        <rect x="-2.5" y="18" width="5" height="10" fill="#7A5020" opacity="0.75"/>
-      </g>
-      <!-- Cypress 2 -->
-      <g transform="translate(420,218)" style="transform:translate(420px,218px) scale(0.8)">
-        <path d="M0,-52 C4,-46 9,-32 8,-18 C9,-4 7,10 4,18 C2,22 -2,22 -4,18 C-7,10 -9,-4 -8,-18 C-9,-32 -4,-46 0,-52 Z" fill="#AA7428" opacity="0.65"/>
-        <rect x="-2.5" y="18" width="5" height="10" fill="#7A5020" opacity="0.65"/>
-      </g>
-      <!-- Cypress 3 (right side) -->
-      <g transform="translate(1020,210)">
-        <path d="M0,-62 C5,-54 11,-38 10,-22 C11,-6 8,12 5,22 C2.5,28 -2.5,28 -5,22 C-8,12 -11,-6 -10,-22 C-11,-38 -5,-54 0,-62 Z" fill="#A87030" opacity="0.7"/>
-        <rect x="-3" y="22" width="6" height="12" fill="#7A5020" opacity="0.7"/>
-      </g>
-      <!-- Cypress 4 -->
-      <g transform="translate(1095,215)">
-        <path d="M0,-48 C4,-42 8,-30 7,-16 C8,-4 6,8 3,16 C1.5,20 -1.5,20 -3,16 C-6,8 -8,-4 -7,-16 C-8,-30 -4,-42 0,-48 Z" fill="#906020" opacity="0.6"/>
-      </g>
-
-      <!-- Near hills — medium green, slight canopy texture -->
-      <path d="M-10,244 C60,228 140,216 240,226 C300,232 348,220 408,224 C468,228 528,240 596,242 C664,244 728,230 800,237 C872,244 936,250 1008,248 C1080,246 1160,230 1268,240 C1360,248 1420,244 1450,246 L1450,300 L-10,300 Z" fill="#3E6038"/>
-
-      <!-- Foreground ground — darkest -->
-      <path d="M-10,268 C80,252 220,240 420,252 C520,258 620,245 740,254 C860,262 980,248 1140,258 C1260,265 1370,260 1450,262 L1450,300 L-10,300 Z" fill="#243A20"/>
-
-      <!-- === FOREGROUND OAK TREES === -->
-      <!-- Each oak: wide spreading canopy, short trunk, distinctive Texas Live Oak shape -->
-
-      <!-- Oak 1 — large, far left -->
-      <g transform="translate(105,260)">
-        <!-- trunk -->
-        <path d="M-5,4 L-7,-22 L-3,-40 L3,-40 L7,-22 L5,4 Z" fill="#172814"/>
-        <!-- main canopy — wide spreading -->
-        <path d="M0,-40 C18,-62 42,-66 62,-58 C82,-50 92,-34 88,-18 C84,-4 70,4 54,8 C40,12 26,8 14,12 C4,16 -4,14 -12,10 C-22,6 -30,2 -36,-4 C-46,-14 -48,-32 -44,-46 C-40,-60 -24,-66 -10,-62 C-4,-60 -2,-52 0,-40 Z" fill="#1A2E16"/>
-        <!-- secondary right lobe -->
-        <path d="M62,-58 C72,-64 82,-62 86,-52 C90,-42 86,-28 76,-22 C84,-34 84,-48 72,-56 C68,-60 64,-60 62,-58 Z" fill="#162812"/>
-        <!-- left lobe -->
-        <path d="M-44,-46 C-52,-56 -56,-62 -48,-66 C-40,-70 -30,-64 -26,-54 C-34,-60 -46,-58 -44,-46 Z" fill="#162812"/>
-      </g>
-
-      <!-- Oak 2 — medium, mid-left -->
-      <g transform="translate(290,264)">
-        <path d="M-4,4 L-5,-18 L-2,-32 L2,-32 L5,-18 L4,4 Z" fill="#172814"/>
-        <path d="M0,-32 C14,-50 34,-52 48,-44 C62,-36 68,-22 64,-10 C60,2 48,8 36,10 C24,12 14,8 6,10 C-2,12 -8,10 -14,6 C-22,2 -26,-8 -24,-22 C-22,-36 -12,-44 0,-32 Z" fill="#1E3418"/>
-        <path d="M48,-44 C56,-50 64,-46 66,-36 C68,-26 62,-14 54,-10 C60,-20 62,-34 52,-42 C50,-44 48,-44 48,-44 Z" fill="#172814"/>
-      </g>
-
-      <!-- Oak 3 — large oak grove, center-left -->
-      <g transform="translate(580,258)">
-        <path d="M-5,5 L-8,-25 L-4,-46 L4,-46 L8,-25 L5,5 Z" fill="#142210"/>
-        <path d="M0,-46 C20,-70 48,-74 70,-64 C92,-54 102,-36 98,-18 C94,-2 78,8 60,12 C44,16 30,10 16,14 C4,18 -6,16 -14,12 C-26,6 -34,-2 -38,-14 C-44,-28 -44,-48 -32,-60 C-22,-70 -8,-72 0,-46 Z" fill="#182C14"/>
-        <!-- extra lobe top -->
-        <path d="M0,-68 C8,-76 18,-74 22,-64 C26,-54 20,-44 12,-40 C16,-50 16,-62 6,-68 C4,-70 2,-70 0,-68 Z" fill="#142210"/>
-      </g>
-
-      <!-- Oak 4 — companion to oak 3 (grove feel) -->
-      <g transform="translate(680,262)">
-        <path d="M-4,4 L-5,-20 L-2,-36 L2,-36 L5,-20 L4,4 Z" fill="#172814"/>
-        <path d="M0,-36 C16,-56 40,-58 56,-48 C72,-38 78,-22 74,-8 C70,4 56,10 44,12 C32,14 22,10 10,12 C0,14 -8,12 -14,8 C-22,2 -26,-10 -24,-24 C-22,-38 -10,-46 0,-36 Z" fill="#1C3018"/>
-      </g>
-
-      <!-- Oak 5 — right side, large -->
-      <g transform="translate(1120,258)">
-        <path d="M-5,4 L-7,-24 L-3,-44 L3,-44 L7,-24 L5,4 Z" fill="#142210"/>
-        <path d="M0,-44 C22,-68 50,-72 72,-62 C94,-52 104,-34 100,-16 C96,2 80,10 62,14 C46,18 32,12 18,16 C6,20 -4,18 -12,14 C-24,8 -32,-2 -34,-16 C-38,-32 -36,-52 -22,-62 C-12,-68 -6,-62 0,-44 Z" fill="#1A2E14"/>
-        <path d="M72,-62 C82,-68 92,-64 96,-52 C100,-40 94,-26 84,-18 C90,-30 92,-48 80,-58 C76,-62 72,-62 72,-62 Z" fill="#142210"/>
-      </g>
-
-      <!-- Oak 6 — far right, smaller -->
-      <g transform="translate(1360,264)">
-        <path d="M-3,4 L-4,-16 L-2,-30 L2,-30 L4,-16 L3,4 Z" fill="#172814"/>
-        <path d="M0,-30 C12,-46 30,-50 44,-42 C58,-34 62,-20 58,-8 C54,4 44,10 32,12 C22,14 12,10 4,12 C-4,14 -10,12 -14,8 C-20,2 -22,-10 -20,-22 C-18,-34 -8,-42 0,-30 Z" fill="#1E3418"/>
-      </g>
-
-      <!-- Foreground grass/ground texture -->
-      <path d="M-10,290 Q180,280 360,286 Q540,292 720,284 Q900,276 1080,284 Q1260,292 1450,286 L1450,300 L-10,300 Z" fill="#1A2E16"/>
-    </svg>
   </div>
 </section>
 
