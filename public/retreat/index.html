@@ -73,11 +73,19 @@
   /* ===================== NAV ===================== */
   #nav {
     position:fixed; top:0; left:0; right:0; z-index:1000;
-    background:rgba(250,248,244,.96); backdrop-filter:blur(14px);
-    border-bottom:1px solid rgba(168,184,164,.25);
-    box-shadow:0 2px 20px rgba(36,40,36,.06);
-    transition:box-shadow .3s ease;
+    background:transparent; backdrop-filter:blur(0px);
+    border-bottom:1px solid transparent;
+    box-shadow:none;
+    transition:background .4s ease, backdrop-filter .4s ease, box-shadow .3s ease, border-color .4s ease;
   }
+  #nav.scrolled {
+    background:rgba(250,248,244,.96); backdrop-filter:blur(14px);
+    border-bottom-color:rgba(168,184,164,.25);
+    box-shadow:0 2px 20px rgba(36,40,36,.06);
+  }
+  #nav.scrolled .nav-logo { color:var(--charcoal); }
+  #nav.scrolled .nav-links a { color:var(--charcoal-l); }
+  #nav.scrolled .nav-links a:hover { color:var(--sage-d); }
   #progress-bar {
     position:absolute; bottom:0; left:0; height:2px;
     background:linear-gradient(90deg, var(--sage-d), var(--sage));
