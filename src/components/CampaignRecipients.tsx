@@ -1,0 +1,462 @@
+"use client";
+
+import { useState, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { QK } from "@/lib/queryKeys";
+import { Upload, Users, Plus, Trash2, Search, UserPlus, FileSpreadsheet, Check, AlertTriangle, Layers } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import type { SegmentRule } from "@/lib/campaign-data";
+import { resolveSegmentMembers } from "@/lib/segment-utils";
+
+export interface Recipient {
+  email: string;
+  name: string;
+  patient_id?: string;
+  source: "customer" | "csv_import" | "manual";
+}
+
+interface CampaignRecipientsProps {
+  recipients: Recipient[];
+  onChange: (recipients: Recipient[]) => void;
+  /** Current campaign ID (for editing — excludes self from duplicate check) */
+  campaignId?: string;
+}
+
+// ─── Segment rule evaluator ───────────────────────────────────────────────────
+type PatientRow = {
+  id: string;
+} & Record<string, unknown>;
+
+export function CampaignRecipients({ recipients, onChange, campaignId }: CampaignRecipientsProps) {
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
+  const [manualName, setManualName] = useState("");
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(
+    new Set(recipients.filter(r => r.patient_id).map(r => r.patient_id!))
+  );
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string>("");
+  const [appliedSegmentId, setAppliedSegmentId] = useState<string>("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const { data: customers = [] } = useQuery({
+    queryKey: ["customers-for-campaign"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("patients")
+        .select("id, first_name, last_name, email")
+        .not("email", "is", null)
+        .order("first_name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const { data: segments = [] } = useQuery({
+    queryKey: QK.segments,
+    queryFn: async () => {
+      const { data } = await supabase.from("segments").select("id, name, description, rules, estimated_count, color, manual_contact_ids").order("name");
+      return data ?? [];
+    },
+  });
+
+  // All patients for segment evaluation — loaded eagerly so they're ready when a segment is selected
+  const { data: allPatientsForSeg = [] } = useQuery({
+    queryKey: ["patients-for-segment-eval"],
+    queryFn: async () => {
+      const { data } = await supabase.from("patients").select("*").not("email", "is", null);
+      return (data ?? []) as unknown as PatientRow[];
+    },
+  });
+
+  const segmentMatches = (() => {
+    if (!selectedSegmentId) return [];
+    const seg = segments.find(s => s.id === selectedSegmentId);
+    if (!seg) return [];
+    const rules: SegmentRule[] = Array.isArray(seg.rules) ? seg.rules as unknown as SegmentRule[] : [];
+    const manualContactIds = Array.isArray(seg.manual_contact_ids) ? seg.manual_contact_ids as string[] : [];
+    return resolveSegmentMembers(allPatientsForSeg, { rules, manualContactIds });
+  })();
+
+  const applySegment = (segId: string, matches: PatientRow[]) => {
+    // Remove previously applied segment contacts first
+    const withoutOld = appliedSegmentId
+      ? recipients.filter(r => !(r.source === "customer" && r.patient_id && segmentMatches.some(m => m.id === r.patient_id)))
+      : [...recipients];
+    const existingEmails = new Set(withoutOld.map(r => r.email.toLowerCase()));
+    const toAdd: Recipient[] = [];
+    let dupeCount = 0;
+    const nextIds = new Set(selectedCustomerIds);
+    for (const p of matches) {
+      const email = p.email as string;
+      if (existingEmails.has(email.toLowerCase())) continue;
+      if (activeEmailSet.has(email.toLowerCase())) dupeCount++;
+      toAdd.push({ email, name: `${(p as any).first_name ?? ""} ${(p as any).last_name ?? ""}`.trim(), patient_id: p.id, source: "customer" });
+      existingEmails.add(email.toLowerCase());
+      nextIds.add(p.id);
+    }
+    setSelectedCustomerIds(nextIds);
+    setAppliedSegmentId(segId);
+    onChange([...withoutOld, ...toAdd]);
+    let msg = `${toAdd.length} contact${toAdd.length !== 1 ? "s" : ""} added from segment`;
+    if (dupeCount > 0) msg += ` (${dupeCount} overlap with active campaigns)`;
+    toast({ title: msg });
+  };
+
+  const removeSegment = () => {
+    const seg = segments.find(s => s.id === appliedSegmentId);
+    const segRules: SegmentRule[] = Array.isArray(seg?.rules) ? seg!.rules as unknown as SegmentRule[] : [];
+    const segManual: string[] = Array.isArray(seg?.manual_contact_ids) ? seg!.manual_contact_ids as string[] : [];
+    const segMembers = resolveSegmentMembers(allPatientsForSeg, { rules: segRules, manualContactIds: segManual });
+    const segIds = new Set(segMembers.map(p => p.id as string));
+    const nextIds = new Set(selectedCustomerIds);
+    segIds.forEach(id => nextIds.delete(id));
+    setSelectedCustomerIds(nextIds);
+    setAppliedSegmentId("");
+    setSelectedSegmentId("");
+    onChange(recipients.filter(r => !r.patient_id || !segIds.has(r.patient_id)));
+    toast({ title: "Segment contacts removed" });
+  };
+
+  // Fetch emails already in active campaigns/sequences (not draft, not completed)
+  const { data: activeCampaignEmails = [] } = useQuery({
+    queryKey: ["active-campaign-emails", campaignId],
+    queryFn: async () => {
+      // First get active campaign IDs
+      const { data: activeCampaigns, error: cErr } = await supabase
+        .from("campaigns")
+        .select("id, name")
+        .in("status", ["scheduled", "sending", "paused"]);
+      if (cErr || !activeCampaigns?.length) return [];
+
+      const activeCampaignIds = activeCampaigns
+        .filter(c => c.id !== campaignId)
+        .map(c => c.id);
+      if (!activeCampaignIds.length) return [];
+
+      const campaignNameMap = Object.fromEntries(activeCampaigns.map(c => [c.id, c.name]));
+
+      const { data, error } = await supabase
+        .from("campaign_recipients")
+        .select("email, campaign_id, status")
+        .in("campaign_id", activeCampaignIds)
+        .neq("status", "skipped");
+      if (error) return [];
+      return (data || []).map((r: any) => ({
+        email: r.email.toLowerCase(),
+        campaignName: campaignNameMap[r.campaign_id] || "Unknown campaign",
+        status: r.status,
+      }));
+    },
+  });
+
+  const activeEmailSet = new Set(activeCampaignEmails.map(e => e.email));
+
+  const getDuplicateWarning = (email: string): string | null => {
+    const match = activeCampaignEmails.find(e => e.email === email.toLowerCase());
+    if (!match) return null;
+    return `Already in "${match.campaignName}" (${match.status})`;
+  };
+
+  const filteredCustomers = customers.filter(c => {
+    const q = search.toLowerCase();
+    return (
+      `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
+      (c.email || "").toLowerCase().includes(q)
+    );
+  });
+
+  const toggleCustomer = (c: typeof customers[0]) => {
+    const next = new Set(selectedCustomerIds);
+    if (next.has(c.id)) {
+      next.delete(c.id);
+      onChange(recipients.filter(r => r.patient_id !== c.id));
+    } else {
+      next.add(c.id);
+      const warning = getDuplicateWarning(c.email!);
+      if (warning) {
+        toast({ title: "Heads up", description: `${c.first_name} is already active in another campaign. They'll be added but watch for overlap.` });
+      }
+      onChange([...recipients, { email: c.email!, name: `${c.first_name} ${c.last_name}`, patient_id: c.id, source: "customer" }]);
+    }
+    setSelectedCustomerIds(next);
+  };
+
+  const selectAll = () => {
+    const eligible = filteredCustomers.filter(c => c.email);
+    const next = new Set(selectedCustomerIds);
+    const newRecipients = [...recipients];
+    let dupeCount = 0;
+    eligible.forEach(c => {
+      if (!next.has(c.id)) {
+        next.add(c.id);
+        if (activeEmailSet.has(c.email!.toLowerCase())) dupeCount++;
+        newRecipients.push({ email: c.email!, name: `${c.first_name} ${c.last_name}`, patient_id: c.id, source: "customer" });
+      }
+    });
+    setSelectedCustomerIds(next);
+    onChange(newRecipients);
+    if (dupeCount > 0) {
+      toast({ title: "Overlap detected", description: `${dupeCount} contact(s) are already in active campaigns.` });
+    }
+  };
+
+  const handleCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split("\n").filter(l => l.trim());
+      const header = lines[0].toLowerCase();
+      const emailIdx = header.split(",").findIndex(h => h.trim().includes("email"));
+      const nameIdx = header.split(",").findIndex(h => h.trim().includes("name"));
+      if (emailIdx === -1) {
+        toast({ title: "CSV Error", description: "No 'email' column found.", variant: "destructive" });
+        return;
+      }
+      const imported: Recipient[] = [];
+      const existingEmails = new Set(recipients.map(r => r.email.toLowerCase()));
+      let dupeCount = 0;
+      let skippedDupes = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",").map(c => c.trim().replace(/^"|"$/g, ""));
+        const email = cols[emailIdx];
+        if (email && email.includes("@")) {
+          if (existingEmails.has(email.toLowerCase())) {
+            skippedDupes++;
+            continue;
+          }
+          if (activeEmailSet.has(email.toLowerCase())) dupeCount++;
+          imported.push({ email, name: nameIdx >= 0 ? cols[nameIdx] || "" : "", source: "csv_import" });
+          existingEmails.add(email.toLowerCase());
+        }
+      }
+      onChange([...recipients, ...imported]);
+      let msg = `Imported ${imported.length} contacts`;
+      if (skippedDupes > 0) msg += `, ${skippedDupes} duplicates skipped`;
+      if (dupeCount > 0) msg += `. ${dupeCount} overlap with active campaigns`;
+      toast({ title: msg });
+    };
+    reader.readAsText(file);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const addManual = () => {
+    if (!manualEmail.includes("@")) return;
+    if (recipients.some(r => r.email.toLowerCase() === manualEmail.toLowerCase())) {
+      toast({ title: "Duplicate", description: "This email is already added.", variant: "destructive" });
+      return;
+    }
+    const warning = getDuplicateWarning(manualEmail);
+    if (warning) {
+      toast({ title: "Overlap detected", description: warning });
+    }
+    onChange([...recipients, { email: manualEmail, name: manualName, source: "manual" }]);
+    setManualEmail("");
+    setManualName("");
+  };
+
+  const removeRecipient = (email: string) => {
+    const removed = recipients.find(r => r.email === email);
+    if (removed?.patient_id) {
+      const next = new Set(selectedCustomerIds);
+      next.delete(removed.patient_id);
+      setSelectedCustomerIds(next);
+    }
+    onChange(recipients.filter(r => r.email !== email));
+  };
+
+  const customerCount = recipients.filter(r => r.source === "customer").length;
+  const csvCount = recipients.filter(r => r.source === "csv_import").length;
+  const manualCount = recipients.filter(r => r.source === "manual").length;
+  const overlapCount = recipients.filter(r => activeEmailSet.has(r.email.toLowerCase())).length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-heading font-semibold text-sm text-foreground">Recipients</h3>
+          <p className="text-xs text-muted-foreground">
+            {recipients.length} contact{recipients.length !== 1 ? "s" : ""} selected
+            {customerCount > 0 && <span className="ml-1">• {customerCount} customers</span>}
+            {csvCount > 0 && <span className="ml-1">• {csvCount} imported</span>}
+            {manualCount > 0 && <span className="ml-1">• {manualCount} manual</span>}
+          </p>
+        </div>
+      </div>
+
+      {/* Overlap warning */}
+      {overlapCount > 0 && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-status-pending/10 border border-status-pending/20">
+          <AlertTriangle className="h-3.5 w-3.5 text-status-pending mt-0.5 shrink-0" />
+          <p className="text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">{overlapCount} recipient(s)</span> are already in active campaigns. 
+            They'll still be added — just be aware they may receive emails from multiple sequences.
+          </p>
+        </div>
+      )}
+
+      <Tabs defaultValue="customers" className="w-full">
+        <TabsList className="w-full grid grid-cols-4">
+          <TabsTrigger value="customers" className="text-xs"><Users className="h-3 w-3 mr-1" />Customers</TabsTrigger>
+          <TabsTrigger value="segments" className="text-xs"><Layers className="h-3 w-3 mr-1" />Segments</TabsTrigger>
+          <TabsTrigger value="csv" className="text-xs"><FileSpreadsheet className="h-3 w-3 mr-1" />CSV</TabsTrigger>
+          <TabsTrigger value="manual" className="text-xs"><UserPlus className="h-3 w-3 mr-1" />Manual</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="customers" className="space-y-2 mt-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input placeholder="Search customers..." className="pl-7 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <Button variant="outline" size="sm" className="text-xs h-8" onClick={selectAll}>
+              <Check className="h-3 w-3 mr-1" />Select All
+            </Button>
+          </div>
+          <ScrollArea className="h-[180px] rounded border p-1">
+            {filteredCustomers.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">No customers with emails found</p>
+            ) : filteredCustomers.map(c => {
+              const dupWarning = getDuplicateWarning(c.email!);
+              return (
+                <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer text-xs">
+                  <Checkbox checked={selectedCustomerIds.has(c.id)} onCheckedChange={() => toggleCustomer(c)} />
+                  <span className="font-medium">{c.first_name} {c.last_name}</span>
+                  {dupWarning && <AlertTriangle className="h-3 w-3 text-status-pending shrink-0" />}
+                  <span className="text-muted-foreground ml-auto truncate max-w-[180px]">{c.email}</span>
+                </label>
+              );
+            })}
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="segments" className="space-y-3 mt-2">
+          {segments.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-6">No segments defined yet. Create them in the Segments tab.</p>
+          ) : (
+            <>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Select a segment</Label>
+                <Select
+                  value={selectedSegmentId}
+                  onValueChange={id => {
+                    setSelectedSegmentId(id);
+                    const seg = segments.find(s => s.id === id);
+                    if (!seg) return;
+                    const rules: SegmentRule[] = Array.isArray(seg.rules) ? seg.rules as unknown as SegmentRule[] : [];
+                    const manualContactIds = Array.isArray(seg.manual_contact_ids) ? seg.manual_contact_ids as string[] : [];
+                    const matches = resolveSegmentMembers(allPatientsForSeg, { rules, manualContactIds });
+                    applySegment(id, matches);
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Choose segment…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {segments.map(s => (
+                      <SelectItem key={s.id} value={s.id} className="text-xs">
+                        <span>{s.name}</span>
+                        {s.estimated_count > 0 && (
+                          <span className="ml-2 text-muted-foreground">~{s.estimated_count}</span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {appliedSegmentId && (
+                <div className="rounded-lg border bg-primary/5 border-primary/20 p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">
+                      {segments.find(s => s.id === appliedSegmentId)?.name}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {recipients.filter(r => r.source === "customer").length} contacts added from this segment
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/5 shrink-0"
+                    onClick={removeSegment}
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />Remove
+                  </Button>
+                </div>
+              )}
+              {selectedSegmentId && !appliedSegmentId && allPatientsForSeg.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">Loading contacts…</p>
+              )}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="csv" className="space-y-3 mt-2">
+          <Card className="border-dashed">
+            <CardContent className="py-6 text-center">
+              <FileSpreadsheet className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
+              <p className="text-xs text-muted-foreground mb-2">Upload a CSV with <code className="text-[10px] bg-muted px-1 rounded">email</code> and optionally <code className="text-[10px] bg-muted px-1 rounded">name</code> columns</p>
+              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleCSV} />
+              <Button variant="outline" size="sm" className="text-xs" onClick={() => fileRef.current?.click()}>
+                <Upload className="h-3 w-3 mr-1" />Choose CSV File
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="manual" className="space-y-2 mt-2">
+          <div className="flex gap-2">
+            <Input placeholder="Name" className="h-8 text-xs" value={manualName} onChange={e => setManualName(e.target.value)} />
+            <Input placeholder="email@example.com" className="h-8 text-xs flex-1" value={manualEmail} onChange={e => setManualEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && addManual()} />
+            <Button size="sm" className="h-8 text-xs" onClick={addManual} disabled={!manualEmail.includes("@")}>
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Selected recipients list */}
+      {recipients.length > 0 && (
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Selected ({recipients.length})</Label>
+          <ScrollArea className="h-[100px] rounded border p-1">
+            {recipients.map(r => {
+              const dupWarning = getDuplicateWarning(r.email);
+              return (
+                <div key={r.email} className="flex items-center justify-between px-2 py-1 text-xs rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Badge variant="outline" className="text-[9px] shrink-0">
+                      {r.source === "customer" ? "CRM" : r.source === "csv_import" ? "CSV" : "Manual"}
+                    </Badge>
+                    <span className="truncate">{r.name || r.email}</span>
+                    {r.name && <span className="text-muted-foreground truncate">{r.email}</span>}
+                    {dupWarning && (
+                      <Badge variant="outline" className="text-[8px] text-status-pending border-status-pending/30 shrink-0">
+                        <AlertTriangle className="h-2 w-2 mr-0.5" />Overlap
+                      </Badge>
+                    )}
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-destructive" onClick={() => removeRecipient(r.email)}>
+                    <Trash2 className="h-2.5 w-2.5" />
+                  </Button>
+                </div>
+              );
+            })}
+          </ScrollArea>
+        </div>
+      )}
+    </div>
+  );
+}

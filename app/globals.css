@@ -1,0 +1,138 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Core brand: teal from logo */
+    --primary: 187 78% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 187 85% 52%;
+
+    --background: 200 20% 97%;
+    --foreground: 210 30% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 30% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 30% 15%;
+
+    --secondary: 187 15% 93%;
+    --secondary-foreground: 187 60% 25%;
+
+    --muted: 200 15% 93%;
+    --muted-foreground: 210 10% 50%;
+
+    --accent: 187 20% 90%;
+    --accent-foreground: 187 60% 25%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 200 15% 88%;
+    --input: 200 15% 88%;
+    --ring: 187 78% 42%;
+
+    --radius: 0.625rem;
+
+    /* Sidebar */
+    --sidebar-background: 210 30% 12%;
+    --sidebar-foreground: 200 15% 85%;
+    --sidebar-primary: 187 78% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 25% 18%;
+    --sidebar-accent-foreground: 200 15% 90%;
+    --sidebar-border: 210 20% 20%;
+    --sidebar-ring: 187 78% 42%;
+
+    /* Category colors */
+    --category-scheduling: 217 80% 55%;
+    --category-health: 152 60% 42%;
+    --category-prescription: 270 55% 55%;
+    --category-billing: 32 85% 52%;
+    --category-urgent: 0 72% 55%;
+    --category-general: 187 50% 45%;
+
+    /* Status colors */
+    --status-pending: 45 90% 50%;
+    --status-assigned: 217 80% 55%;
+    --status-resolved: 152 60% 42%;
+    --status-escalated: 0 72% 55%;
+    --status-auto: 187 60% 45%;
+
+    /* Fonts */
+    --font-heading: 'Space Grotesk', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+
+    /* Shadows */
+    --shadow-card: 0 1px 3px 0 hsl(210 30% 15% / 0.04), 0 1px 2px -1px hsl(210 30% 15% / 0.04);
+    --shadow-elevated: 0 4px 16px -2px hsl(210 30% 15% / 0.08), 0 2px 4px -2px hsl(210 30% 15% / 0.04);
+    --shadow-glow: 0 0 20px hsl(187 78% 42% / 0.15);
+  }
+
+  .dark {
+    --primary: 187 78% 52%;
+    --primary-foreground: 210 30% 8%;
+    --primary-glow: 187 85% 62%;
+
+    --background: 210 30% 8%;
+    --foreground: 200 15% 90%;
+
+    --card: 210 25% 12%;
+    --card-foreground: 200 15% 90%;
+
+    --popover: 210 25% 14%;
+    --popover-foreground: 200 15% 90%;
+
+    --secondary: 210 20% 18%;
+    --secondary-foreground: 200 15% 85%;
+
+    --muted: 210 20% 18%;
+    --muted-foreground: 200 10% 55%;
+
+    --accent: 210 20% 20%;
+    --accent-foreground: 200 15% 90%;
+
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 20% 22%;
+    --input: 210 20% 22%;
+    --ring: 187 78% 52%;
+
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.2), 0 1px 2px -1px hsl(0 0% 0% / 0.2);
+    --shadow-elevated: 0 4px 16px -2px hsl(0 0% 0% / 0.3), 0 2px 4px -2px hsl(0 0% 0% / 0.2);
+    --shadow-glow: 0 0 20px hsl(187 78% 52% / 0.2);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer utilities {
+  .gradient-brand {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-elevated {
+    box-shadow: var(--shadow-elevated);
+  }
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+}
