@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { EmailPreview } from "@/components/EmailPreview";
+import { RichEmailEditor } from "@/components/RichEmailEditor";
 import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
 import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus } from "@/lib/types";
 import { CampaignActivityLog } from "@/components/CampaignActivityLog";
@@ -744,23 +745,18 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
               </div>
             )}
             <div className="flex-1">
-              <Label className="text-xs">Email Body (HTML)</Label>
-              <Textarea
-                className="mt-1 text-xs font-mono min-h-[320px] resize-y"
-                value={editingEmail?.bodyHtml ?? ""}
-                onChange={e => setEditingEmail(p => p ? { ...p, bodyHtml: e.target.value } : p)}
-                placeholder="<p>Hi {first_name},</p>…"
-              />
-              <p className="text-[10px] text-muted-foreground mt-1">Use <code className="bg-muted px-1 rounded">{`{first_name}`}</code> for personalization. HTML is supported.</p>
-            </div>
-            {editingEmail?.bodyHtml && (
-              <div>
-                <Label className="text-xs text-muted-foreground">Preview</Label>
-                <div className="mt-1 rounded-lg border overflow-hidden">
-                  <EmailPreview html={editingEmail.bodyHtml} subject={editingEmail.subject} />
-                </div>
+              <Label className="text-xs">Email Body</Label>
+              <div className="mt-1">
+                <RichEmailEditor
+                  value={editingEmail?.bodyHtml ?? ""}
+                  onChange={(html) => setEditingEmail(p => p ? { ...p, bodyHtml: html } : p)}
+                  subject={editingEmail?.subject}
+                  previewText={editingEmail?.previewText}
+                  placeholder="Write your email here. Use double Enter for paragraphs. Click 'Insert Variable' to personalize with contact data."
+                  minHeight={280}
+                />
               </div>
-            )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingEmail(null)}>Cancel</Button>
