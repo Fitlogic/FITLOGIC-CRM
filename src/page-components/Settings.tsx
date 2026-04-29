@@ -412,7 +412,9 @@ function IntegrationsTab({
 
   const handleGoogleConnect = () => {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-    const redirectUri = `${window.location.origin}/settings?tab=integrations`;
+    // Store current tab to restore after OAuth redirect
+    localStorage.setItem("settings_active_tab", "integrations");
+    const redirectUri = `${window.location.origin}/settings`;
     const scope = encodeURIComponent(
       "https://www.googleapis.com/auth/calendar.readonly " +
       "https://www.googleapis.com/auth/gmail.send " +
@@ -642,19 +644,27 @@ const Settings = () => {
   const [activeTab, setActiveTab] = useState("practice");
   const [oauthLoading, setOauthLoading] = useState(false);
 
+  // Restore tab from localStorage after OAuth redirect
+  useEffect(() => {
+    const savedTab = localStorage.getItem("settings_active_tab");
+    if (savedTab) {
+      setActiveTab(savedTab);
+      localStorage.removeItem("settings_active_tab");
+    }
+  }, []);
+
   // Handle Google OAuth callback — exchange code for tokens via edge function
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
-    const tab  = params.get("tab");
 
-    if (code && tab === "integrations") {
+    if (code) {
       // Clean URL immediately so a refresh doesn't re-trigger
-      window.history.replaceState({}, "", window.location.pathname + "?tab=integrations");
-      setActiveTab("integrations");
+      window.history.replaceState({}, "", window.location.pathname);
       setOauthLoading(true);
 
-      const redirectUri = `${window.location.origin}/settings?tab=integrations`;
+      // redirectUri must match exactly what was registered in Google Console (no query params)
+      const redirectUri = `${window.location.origin}/settings`;
 
       fetch("/api/google-oauth-callback", {
         method: "POST",
@@ -678,8 +688,6 @@ const Settings = () => {
           }
         })
         .finally(() => setOauthLoading(false));
-    } else if (tab) {
-      setActiveTab(tab);
     }
   }, []);
 
