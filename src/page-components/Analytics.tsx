@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { QK } from "@/lib/queryKeys";
@@ -20,6 +20,7 @@ type PatientAnalyticsRow = {
   id: string;
   status: string;
   pipeline_stage: string | null;
+  pipeline_stage_changed_at: string | null;
   lead_source: string | null;
   deal_value: number | null;
   company: string | null;
@@ -203,6 +204,54 @@ export default function Analytics() {
       .filter((row) => row.count > 0);
   }, [patients]);
 
+  // A2.2: Won/Lost reporting with deal value + avg days-to-close, filterable
+  // by 30d / 90d / All time. Cohorts by pipeline_stage_changed_at (set by the
+  // server-side trigger) so we measure transitions, not deal age.
+  const [wonLostRange, setWonLostRange] = useState<"30d" | "90d" | "all">("30d");
+
+  const wonLostMetrics = useMemo(() => {
+    const cutoff = wonLostRange === "all" ? 0
+      : wonLostRange === "30d" ? Date.now() - 30 * 24 * 60 * 60 * 1000
+      : Date.now() - 90 * 24 * 60 * 60 * 1000;
+
+    let won = 0;
+    let lost = 0;
+    let qualifiedOrPast = 0; // Qualified, Proposal, Negotiation, Won, Lost — proxy for "got past Contacted"
+    let wonValue = 0;
+    let totalDaysToClose = 0;
+    let daysToCloseSamples = 0;
+
+    for (const p of patients) {
+      const stage = p.pipeline_stage ?? "new_lead";
+      const changedAt = p.pipeline_stage_changed_at ?? p.created_at;
+      const inRange = !cutoff || new Date(changedAt).getTime() >= cutoff;
+
+      if (["qualified", "proposal", "negotiation", "won", "lost"].includes(stage)) {
+        qualifiedOrPast++;
+      }
+      if (inRange) {
+        if (stage === "won") {
+          won++;
+          wonValue += p.deal_value ?? 0;
+          if (p.pipeline_stage_changed_at) {
+            const days = (new Date(p.pipeline_stage_changed_at).getTime() - new Date(p.created_at).getTime()) / 86400000;
+            if (days >= 0 && Number.isFinite(days)) {
+              totalDaysToClose += days;
+              daysToCloseSamples++;
+            }
+          }
+        } else if (stage === "lost") {
+          lost++;
+        }
+      }
+    }
+
+    const conversionRate = qualifiedOrPast > 0 ? Math.round((won / qualifiedOrPast) * 100) : 0;
+    const avgDaysToClose = daysToCloseSamples > 0 ? Math.round(totalDaysToClose / daysToCloseSamples) : null;
+
+    return { won, lost, conversionRate, wonValue, avgDaysToClose };
+  }, [patients, wonLostRange]);
+
   const pipelineKpis = useMemo(() => {
     const total = patients.length;
     const openOpportunities = patients.filter((patient) => {
@@ -224,10 +273,20 @@ export default function Analytics() {
     };
   }, [patients]);
 
+  // A1.3: lead-source card has a local date-range chip so Megan can answer
+  // "how many leads came in from each source in the last 30 / 90 days."
+  // Custom values added in Settings flow through here verbatim — we no longer
+  // try to map them to a fixed label dictionary.
+  const [leadSourceRange, setLeadSourceRange] = useState<"30d" | "90d" | "all">("90d");
+
   const leadSources = useMemo(() => {
+    const cutoff = leadSourceRange === "all" ? 0
+      : leadSourceRange === "30d" ? Date.now() - 30 * 24 * 60 * 60 * 1000
+      : Date.now() - 90 * 24 * 60 * 60 * 1000;
     const counts: Record<string, number> = {};
     for (const patient of patients) {
-      const source = patient.lead_source ?? "other";
+      if (cutoff && new Date(patient.created_at).getTime() < cutoff) continue;
+      const source = patient.lead_source ?? "Unknown";
       counts[source] = (counts[source] ?? 0) + 1;
     }
 
@@ -238,7 +297,7 @@ export default function Analytics() {
         source: LEAD_SOURCE_LABELS[source] ?? source,
         count,
       }));
-  }, [patients]);
+  }, [patients, leadSourceRange]);
 
   const emailKpis = useMemo(() => {
     const total = sendLog.length;
@@ -348,6 +407,60 @@ export default function Analytics() {
             <KpiCard title="Pipeline Value" value={fmtCurrency(pipelineKpis.pipelineValue)} icon={DollarSign} />
           </div>
 
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-start justify-between gap-2 flex-wrap">
+                <div>
+                  <CardTitle className="text-sm">Won / Lost performance</CardTitle>
+                  <CardDescription>Deals closed in the selected window</CardDescription>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  {(["30d", "90d", "all"] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setWonLostRange(r)}
+                      className={`text-[10px] rounded-full border px-2 py-0.5 transition-colors ${
+                        wonLostRange === r
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-muted-foreground border-border hover:bg-muted"
+                      }`}
+                    >
+                      {r === "all" ? "All time" : `Last ${r}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Won</p>
+                  <p className="text-2xl font-semibold text-emerald-600">{wonLostMetrics.won}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Lost</p>
+                  <p className="text-2xl font-semibold text-red-500">{wonLostMetrics.lost}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Conversion</p>
+                  <p className="text-2xl font-semibold">{wonLostMetrics.conversionRate}%</p>
+                  <p className="text-[10px] text-muted-foreground">Qualified → Won</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Won value</p>
+                  <p className="text-2xl font-semibold">{fmtCurrency(wonLostMetrics.wonValue)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Avg days to close</p>
+                  <p className="text-2xl font-semibold">{wonLostMetrics.avgDaysToClose ?? "—"}</p>
+                </div>
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                Lost = explicit decline only. Don&apos;t mark a contact Lost just because they didn&apos;t reply — leave them Contacted.
+              </p>
+            </CardContent>
+          </Card>
+
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <Card>
               <CardHeader className="pb-2">
@@ -381,8 +494,27 @@ export default function Analytics() {
 
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Lead Sources</CardTitle>
-                <CardDescription>Where contacts are coming from</CardDescription>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-sm">Lead Sources</CardTitle>
+                    <CardDescription>Where contacts are coming from</CardDescription>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    {(["30d", "90d", "all"] as const).map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setLeadSourceRange(r)}
+                        className={`text-[10px] rounded-full border px-2 py-0.5 transition-colors ${
+                          leadSourceRange === r
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background text-muted-foreground border-border hover:bg-muted"
+                        }`}
+                      >
+                        {r === "all" ? "All time" : `Last ${r}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {leadSources.length > 0 ? (
@@ -390,13 +522,13 @@ export default function Analytics() {
                     <BarChart data={leadSources} layout="vertical" margin={{ left: 8, right: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                       <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="source" tick={{ fontSize: 11 }} width={100} />
+                      <YAxis type="category" dataKey="source" tick={{ fontSize: 11 }} width={140} />
                       <Tooltip />
                       <Bar dataKey="count" fill="#2563eb" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <p className="py-8 text-center text-sm text-muted-foreground">No source data yet</p>
+                  <p className="py-8 text-center text-sm text-muted-foreground">No source data in the selected range</p>
                 )}
               </CardContent>
             </Card>

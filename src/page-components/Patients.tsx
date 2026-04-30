@@ -9,7 +9,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   Users, Plus, Search, MoreHorizontal, Mail, Building2,
   Eye, Pencil, Trash2, ChevronLeft, ArrowUpDown, Tag, StickyNote,
-  TrendingUp, Send, X, Filter, Upload, Download,
+  TrendingUp, Send, X, Filter, Upload, Download, Clock, FlaskConical, MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -56,6 +57,8 @@ type Patient = {
   status: string;
   tags: string[] | null;
   notes: string | null;
+  is_test_contact: boolean | null;
+  last_contacted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -281,7 +284,9 @@ export default function Patients() {
   const [statusFilter, setStatusFilter] = useState<string>(saved?.statusFilter ?? "all");
   const [stageFilter, setStageFilter] = useState<string>(saved?.stageFilter ?? "all");
   const [sourceFilter, setSourceFilter] = useState<string>(saved?.sourceFilter ?? "all");
-  const [sortBy, setSortBy] = useState<"newest" | "name" | "company" | "deal_value">(saved?.sortBy ?? "newest");
+  const [sortBy, setSortBy] = useState<"newest" | "name" | "company" | "deal_value" | "last_contacted_oldest" | "last_contacted_newest">(saved?.sortBy ?? "newest");
+  const [contactFilter, setContactFilter] = useState<"all" | "never" | "30d">(saved?.contactFilter ?? "all");
+  const [stateFilter, setStateFilter] = useState<string>(saved?.stateFilter ?? "all");
   const [showFilters, setShowFilters] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -294,13 +299,13 @@ export default function Patients() {
 
   // Persist filters to sessionStorage
   useEffect(() => {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ search, statusFilter, stageFilter, sourceFilter, sortBy }));
-  }, [search, statusFilter, stageFilter, sourceFilter, sortBy]);
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ search, statusFilter, stageFilter, sourceFilter, sortBy, contactFilter, stateFilter }));
+  }, [search, statusFilter, stageFilter, sourceFilter, sortBy, contactFilter, stateFilter]);
 
-  const hasActiveFilters = search || statusFilter !== "all" || stageFilter !== "all" || sourceFilter !== "all";
+  const hasActiveFilters = search || statusFilter !== "all" || stageFilter !== "all" || sourceFilter !== "all" || contactFilter !== "all" || stateFilter !== "all";
 
   const clearFilters = () => {
-    setSearch(""); setStatusFilter("all"); setStageFilter("all"); setSourceFilter("all"); setSortBy("newest");
+    setSearch(""); setStatusFilter("all"); setStageFilter("all"); setSourceFilter("all"); setSortBy("newest"); setContactFilter("all"); setStateFilter("all");
   };
 
   const PAGE_SIZE = 500;
@@ -402,8 +407,10 @@ export default function Patients() {
   const parseTags = (t: string) => t ? t.split(",").map(s => s.trim()).filter(Boolean) : [];
 
   const patientPayload = (form: PatientFormData) => {
-    // DB uses `status` as the pipeline stage column (e.g. "new_lead", "contacted", etc.)
-    const stage = form.pipeline_stage || form.status || "new_lead";
+    // patients.status   = account status (active/inactive/archived)
+    // patients.pipeline_stage = deal stage (new_lead/contacted/qualified/...)
+    // The two are separate columns — see migration 20260406000001 for the
+    // pipeline_stage CHECK constraint.
     return {
       first_name: form.first_name,
       last_name: form.last_name,
@@ -419,6 +426,8 @@ export default function Patients() {
       state: form.state || null,
       zip_code: form.zip_code || null,
       status: form.status || "active",
+      pipeline_stage: form.pipeline_stage || "new_lead",
+      is_test_contact: !!form.is_test_contact,
       tags: parseTags(form.tags),
       notes: form.notes || null,
     };
@@ -484,6 +493,43 @@ export default function Patients() {
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  // A2.3: bulk-tag selected contacts into a segment via segments.manual_contact_ids.
+  const { data: segments = [] } = useQuery({
+    queryKey: QK.segments,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("segments")
+        .select("id, name, manual_contact_ids")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as { id: string; name: string; manual_contact_ids: string[] | null }[];
+    },
+  });
+  const [addToSegmentOpen, setAddToSegmentOpen] = useState(false);
+  const [segmentChoice, setSegmentChoice] = useState<string>("");
+
+  const addToSegmentMutation = useMutation({
+    mutationFn: async ({ segmentId, ids }: { segmentId: string; ids: string[] }) => {
+      const seg = segments.find((s) => s.id === segmentId);
+      if (!seg) throw new Error("Segment not found");
+      const merged = Array.from(new Set([...(seg.manual_contact_ids ?? []), ...ids]));
+      const { error } = await supabase
+        .from("segments")
+        .update({ manual_contact_ids: merged })
+        .eq("id", segmentId);
+      if (error) throw error;
+      return { name: seg.name, added: ids.length };
+    },
+    onSuccess: ({ name, added }) => {
+      queryClient.invalidateQueries({ queryKey: QK.segments });
+      setSelected(new Set());
+      setAddToSegmentOpen(false);
+      setSegmentChoice("");
+      toast({ title: `Added ${added} to “${name}”` });
+    },
+    onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -520,6 +566,16 @@ export default function Patients() {
     }
     if (stageFilter !== "all") result = result.filter(p => p.pipeline_stage === stageFilter);
     if (sourceFilter !== "all") result = result.filter(p => p.lead_source === sourceFilter);
+    if (stateFilter !== "all") {
+      const norm = stateFilter.trim().toLowerCase();
+      result = result.filter(p => (p.state ?? "").trim().toLowerCase() === norm);
+    }
+    if (contactFilter === "never") {
+      result = result.filter(p => !p.last_contacted_at);
+    } else if (contactFilter === "30d") {
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      result = result.filter(p => !p.last_contacted_at || new Date(p.last_contacted_at).getTime() < thirtyDaysAgo);
+    }
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(p =>
@@ -532,8 +588,34 @@ export default function Patients() {
     if (sortBy === "name") result = [...result].sort((a, b) => a.first_name.localeCompare(b.first_name));
     else if (sortBy === "company") result = [...result].sort((a, b) => (a.company || "").localeCompare(b.company || ""));
     else if (sortBy === "deal_value") result = [...result].sort((a, b) => (b.deal_value || 0) - (a.deal_value || 0));
+    else if (sortBy === "last_contacted_oldest") {
+      // NULL last_contacted_at = "never contacted" — surface to the top so
+      // Megan picks them first in her daily 10-contact pull.
+      result = [...result].sort((a, b) => {
+        const aT = a.last_contacted_at ? new Date(a.last_contacted_at).getTime() : -Infinity;
+        const bT = b.last_contacted_at ? new Date(b.last_contacted_at).getTime() : -Infinity;
+        return aT - bT;
+      });
+    } else if (sortBy === "last_contacted_newest") {
+      result = [...result].sort((a, b) => {
+        const aT = a.last_contacted_at ? new Date(a.last_contacted_at).getTime() : -Infinity;
+        const bT = b.last_contacted_at ? new Date(b.last_contacted_at).getTime() : -Infinity;
+        return bT - aT;
+      });
+    }
     return result;
-  }, [allPatients, statusFilter, stageFilter, sourceFilter, search, sortBy]);
+  }, [allPatients, statusFilter, stageFilter, sourceFilter, search, sortBy, contactFilter, stateFilter]);
+
+  // Distinct state values present in the loaded contacts — fuels the
+  // state-filter dropdown so Megan can scope a campaign to (e.g.) Texas.
+  const stateOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const p of allPatients) {
+      const s = (p.state ?? "").trim();
+      if (s) seen.add(s);
+    }
+    return Array.from(seen).sort();
+  }, [allPatients]);
 
   // ─── DETAIL VIEW ───
   if (viewing) {
@@ -558,10 +640,27 @@ export default function Patients() {
               <h1 className="font-heading text-2xl font-bold text-foreground">
                 {p.first_name} {p.last_name}
               </h1>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <StatusPill status={p.status} />
                 <Badge variant="outline">{PIPELINE_STAGE_LABELS[p.pipeline_stage] ?? p.pipeline_stage}</Badge>
                 <LeadSourceBadge source={p.lead_source} />
+                {p.is_test_contact && (
+                  <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-100/40">
+                    <FlaskConical className="h-3 w-3 mr-1" /> Test
+                  </Badge>
+                )}
+                {p.last_contacted_at && (
+                  <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Last contact {new Date(p.last_contacted_at).toLocaleDateString()}
+                  </span>
+                )}
+                {!p.last_contacted_at && (
+                  <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Never contacted
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -908,6 +1007,7 @@ export default function Patients() {
                 state: editing.state || "", zip_code: editing.zip_code || "",
                 status: editing.status, tags: (editing.tags || []).join(", "),
                 notes: editing.notes || "",
+                is_test_contact: !!editing.is_test_contact,
               } : undefined}
               onSubmit={(data) => editing ? updateMutation.mutate({ id: editing.id, form: data }) : addMutation.mutate(data)}
               onCancel={() => { setFormOpen(false); setEditing(null); }}
@@ -990,7 +1090,12 @@ export default function Patients() {
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5 h-9">
                 <ArrowUpDown className="h-3.5 w-3.5" />
-                {sortBy === "newest" ? "Newest" : sortBy === "name" ? "Name" : sortBy === "company" ? "Company" : "Deal Value"}
+                {sortBy === "newest" ? "Newest"
+                  : sortBy === "name" ? "Name"
+                  : sortBy === "company" ? "Company"
+                  : sortBy === "deal_value" ? "Deal Value"
+                  : sortBy === "last_contacted_oldest" ? "Oldest contact"
+                  : "Newest contact"}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -998,8 +1103,54 @@ export default function Patients() {
               <DropdownMenuItem onClick={() => setSortBy("name")}>By Name</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSortBy("company")}>By Company</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setSortBy("deal_value")}>By Deal Value</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortBy("last_contacted_oldest")}>Last Contacted (oldest first)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortBy("last_contacted_newest")}>Last Contacted (newest first)</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Last-contacted quick-filter chip (A1.4) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={contactFilter !== "all" ? "secondary" : "outline"}
+                size="sm"
+                className="gap-1.5 h-9"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {contactFilter === "never" ? "Never contacted"
+                  : contactFilter === "30d" ? "Not in 30d"
+                  : "Any contact recency"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setContactFilter("all")}>All contacts</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setContactFilter("never")}>Never contacted</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setContactFilter("30d")}>Not contacted in 30 days</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* State filter (A2.6) — runs over distinct values in the loaded
+              contact set so it doesn't surface states with no contacts. */}
+          {stateOptions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant={stateFilter !== "all" ? "secondary" : "outline"}
+                  size="sm"
+                  className="gap-1.5 h-9"
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  {stateFilter === "all" ? "Any state" : stateFilter}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+                <DropdownMenuItem onClick={() => setStateFilter("all")}>Any state</DropdownMenuItem>
+                {stateOptions.map((s) => (
+                  <DropdownMenuItem key={s} onClick={() => setStateFilter(s)}>{s}</DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {/* More filters toggle */}
           <Button
@@ -1078,6 +1229,9 @@ export default function Patients() {
       {selected.size > 0 && (
         <div className="flex items-center gap-3 rounded-lg border bg-card p-3 shadow-card">
           <span className="text-sm font-medium">{selected.size} selected</span>
+          <Button variant="outline" size="sm" onClick={() => setAddToSegmentOpen(true)}>
+            <Tag className="h-3.5 w-3.5 mr-1" /> Add to segment
+          </Button>
           <Button variant="destructive" size="sm" onClick={() => setBulkDeleteOpen(true)}>
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete Selected
           </Button>
@@ -1244,6 +1398,7 @@ export default function Patients() {
               state: editing.state || "", zip_code: editing.zip_code || "",
               status: editing.status, tags: (editing.tags || []).join(", "),
               notes: editing.notes || "",
+              is_test_contact: !!editing.is_test_contact,
             } : undefined}
             onSubmit={(data) => editing ? updateMutation.mutate({ id: editing.id, form: data }) : addMutation.mutate(data)}
             onCancel={() => { setFormOpen(false); setEditing(null); }}
@@ -1293,6 +1448,35 @@ export default function Patients() {
 
       {/* Bulk Import */}
       <BulkImportDialog open={importOpen} onOpenChange={setImportOpen} />
+
+      {/* Add to segment (A2.3) */}
+      <Dialog open={addToSegmentOpen} onOpenChange={(o) => { setAddToSegmentOpen(o); if (!o) setSegmentChoice(""); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add {selected.size} contact{selected.size === 1 ? "" : "s"} to a segment</DialogTitle>
+            <DialogDescription>
+              Pick the segment to tag. Existing members of that segment are kept; duplicates are ignored.
+            </DialogDescription>
+          </DialogHeader>
+          <Select value={segmentChoice} onValueChange={setSegmentChoice}>
+            <SelectTrigger className="h-9"><SelectValue placeholder="Select segment" /></SelectTrigger>
+            <SelectContent>
+              {segments.map((s) => (
+                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddToSegmentOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => addToSegmentMutation.mutate({ segmentId: segmentChoice, ids: Array.from(selected) })}
+              disabled={!segmentChoice || addToSegmentMutation.isPending}
+            >
+              {addToSegmentMutation.isPending ? "Adding…" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -52,26 +52,52 @@ async function updateCampaignStats(supabase: SupabaseClient, campaignId: string)
   await supabase.from("campaigns").update({ stats }).eq("id", campaignId);
 }
 
+// Hardcoded Texas timezone for 8am daily sends
+const TEXAS_TIMEZONE = "America/Chicago";
+const SEND_HOUR = 8; // 8:00 AM Texas time
+
 async function processCampaigns(supabase: SupabaseClient) {
   const { data: settings } = await supabase
     .from("practice_settings")
-    .select("email_provider_api_key, email_from_address, email_from_name, timezone, business_hours_start, business_hours_end, business_days, max_sends_per_day")
+    .select("email_provider_api_key, email_from_address, email_from_name, max_sends_per_day")
     .limit(1)
     .single();
+
+  // While the practice is on the shared API key, only contacts flagged
+  // patients.is_test_contact = true are eligible to receive sends. Megan flips
+  // practice_settings.test_mode_only to false once she is on her own key. The
+  // auto-generated supabase types in src/integrations/supabase/types.ts
+  // predate this column so we fetch it through a separate untyped read.
+  const { data: testModeRow } = await (supabase.from("practice_settings") as unknown as {
+    select: (cols: string) => { limit: (n: number) => { single: () => Promise<{ data: { test_mode_only?: boolean } | null }> } };
+  })
+    .select("test_mode_only")
+    .limit(1)
+    .single();
+  const testModeOnly = testModeRow?.test_mode_only ?? true;
 
   const emailApiKey: string = process.env.RESEND_API_KEY ?? settings?.email_provider_api_key ?? "";
   // FROM_EMAIL env var takes priority over the DB setting
   const fromAddress = process.env.FROM_EMAIL ?? settings?.email_from_address ?? "";
   const fromName = settings?.email_from_name ?? "FitLogic";
-  const practiceTimezone = settings?.timezone ?? "America/New_York";
   const fromHeader = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
 
   const now = new Date();
-  const localTimeStr = now.toLocaleString("en-US", { timeZone: practiceTimezone });
-  const localNow = new Date(localTimeStr);
-  const currentHour = localNow.getHours();
+
+  // Get current time in Texas timezone
+  const texasTimeStr = now.toLocaleString("en-US", { timeZone: TEXAS_TIMEZONE });
+  const texasNow = new Date(texasTimeStr);
+  const currentHour = texasNow.getHours();
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const currentDay = dayNames[localNow.getDay()];
+  const currentDay = dayNames[texasNow.getDay()];
+
+  // Only process if it's around 8am Texas time (allowing some buffer for cron timing)
+  if (currentHour !== SEND_HOUR) {
+    return { message: `Skipped - current Texas time is ${currentHour}:00, not ${SEND_HOUR}:00` };
+  }
+
+  // Get today's date in Texas timezone for duplicate prevention
+  const texasDateStr = texasNow.toLocaleDateString("en-CA"); // YYYY-MM-DD
 
   const { data: campaigns, error: campErr } = await supabase
     .from("campaigns")
@@ -89,34 +115,19 @@ async function processCampaigns(supabase: SupabaseClient) {
 
   const results: unknown[] = [];
 
-  const localDateStr = localNow.toLocaleDateString("en-CA"); // YYYY-MM-DD in practice timezone
-
   for (const campaign of campaigns) {
-    const bhStart = campaign.business_hours_start ?? settings?.business_hours_start ?? 8;
-    const bhEnd = campaign.business_hours_end ?? settings?.business_hours_end ?? 18;
-    const bizDays: string[] = campaign.business_days ?? settings?.business_days ?? ["Mon", "Tue", "Wed", "Thu", "Fri"];
-
-    if (!bizDays.includes(currentDay)) { results.push({ campaign: campaign.name, skipped: "not a business day" }); continue; }
-    if (currentHour < bhStart || currentHour >= bhEnd) { results.push({ campaign: campaign.name, skipped: "outside business hours" }); continue; }
-
-    // Determine the scheduled hour in the practice timezone
-    // Emails must only fire during the exact hour of scheduled_at — not any later cron tick
-    if (campaign.scheduled_at) {
-      const scheduledLocalStr = new Date(campaign.scheduled_at).toLocaleString("en-US", { timeZone: practiceTimezone });
-      const scheduledLocal = new Date(scheduledLocalStr);
-      const scheduledHour = scheduledLocal.getHours();
-
-      if (currentHour !== scheduledHour) {
-        results.push({ campaign: campaign.name, skipped: `wrong hour — scheduled for ${scheduledHour}:xx, current hour is ${currentHour}` });
-        continue;
-      }
+    // Only send on weekdays (Mon-Fri) at 8am Texas time
+    const businessDays = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    if (!businessDays.includes(currentDay)) {
+      results.push({ campaign: campaign.name, skipped: "not a business day (Mon-Fri only)" });
+      continue;
     }
 
-    // Skip campaigns already sent this calendar day (practice timezone) — prevents duplicate sends
+    // Skip campaigns already sent this calendar day (Texas timezone) — prevents duplicate sends
     // For sequences, individual recipient delay_days logic handles per-step gating instead
     if (campaign.campaign_type !== "sequence" && campaign.last_sent_at) {
-      const lastSentLocalStr = new Date(campaign.last_sent_at).toLocaleDateString("en-CA", { timeZone: practiceTimezone });
-      if (lastSentLocalStr === localDateStr) {
+      const lastSentTexasStr = new Date(campaign.last_sent_at).toLocaleDateString("en-CA", { timeZone: TEXAS_TIMEZONE });
+      if (lastSentTexasStr === texasDateStr) {
         results.push({ campaign: campaign.name, skipped: "already sent today" });
         continue;
       }
@@ -124,8 +135,8 @@ async function processCampaigns(supabase: SupabaseClient) {
 
     // For sequences: skip if the last send for this campaign was already today (any recipient)
     if (campaign.campaign_type === "sequence" && campaign.last_sent_at) {
-      const lastSentLocalStr = new Date(campaign.last_sent_at).toLocaleDateString("en-CA", { timeZone: practiceTimezone });
-      if (lastSentLocalStr === localDateStr) {
+      const lastSentTexasStr = new Date(campaign.last_sent_at).toLocaleDateString("en-CA", { timeZone: TEXAS_TIMEZONE });
+      if (lastSentTexasStr === texasDateStr) {
         results.push({ campaign: campaign.name, skipped: "sequence already processed today" });
         continue;
       }
@@ -176,6 +187,36 @@ async function processCampaigns(supabase: SupabaseClient) {
       .order("created_at")
       .limit(Math.min(remaining, 500));
 
+    // Test-mode gate (A1.5): build the set of patient_ids that are flagged
+    // is_test_contact = true so we can skip everyone else without one SELECT
+    // per recipient inside the loop.
+    let testEligiblePatientIds: Set<string> = new Set();
+    if (testModeOnly && pendingRecipients?.length) {
+      const patientIds = Array.from(
+        new Set(
+          pendingRecipients
+            .map((r: { patient_id: string | null }) => r.patient_id)
+            .filter((id): id is string => !!id),
+        ),
+      );
+      if (patientIds.length > 0) {
+        // Cast through unknown — auto-generated supabase types predate the
+        // is_test_contact column.
+        const { data: testRows } = await (supabase
+          .from("patients") as unknown as {
+            select: (cols: string) => {
+              in: (col: string, ids: string[]) => {
+                eq: (col: string, val: boolean) => Promise<{ data: { id: string }[] | null }>;
+              };
+            };
+          })
+          .select("id")
+          .in("id", patientIds)
+          .eq("is_test_contact", true);
+        testEligiblePatientIds = new Set((testRows ?? []).map((r: { id: string }) => r.id));
+      }
+    }
+
     if (!pendingRecipients?.length) {
       const { count: remainingFailed } = await supabase
         .from("campaign_recipients")
@@ -200,6 +241,15 @@ async function processCampaigns(supabase: SupabaseClient) {
       const emailLower = recipient.email.toLowerCase();
       if (suppressedEmails.has(emailLower) || unsubEmails.has(emailLower)) {
         await supabase.from("campaign_recipients").update({ status: "skipped", last_error: "Suppressed or unsubscribed" }).eq("id", recipient.id);
+        skippedCount++;
+        continue;
+      }
+
+      if (testModeOnly && !(recipient.patient_id && testEligiblePatientIds.has(recipient.patient_id))) {
+        await supabase
+          .from("campaign_recipients")
+          .update({ status: "skipped", last_error: "Test mode — only contacts flagged is_test_contact=true receive sends" })
+          .eq("id", recipient.id);
         skippedCount++;
         continue;
       }
@@ -270,6 +320,16 @@ async function processCampaigns(supabase: SupabaseClient) {
         const recipientUpdate: Record<string, unknown> = { status: isSequence ? "pending" : "sent", sent_at: now.toISOString() };
         if (isSequence) { recipientUpdate.current_step = stepNumber; if (stepNumber >= sequences.length) recipientUpdate.status = "completed"; }
         await supabase.from("campaign_recipients").update(recipientUpdate).eq("id", recipient.id);
+        // A1.4: stamp the patient's last_contacted_at so the daily list can
+        // sort by it. Cast through unknown — auto-generated supabase types
+        // predate this column.
+        if (recipient.patient_id) {
+          await (supabase.from("patients") as unknown as {
+            update: (vals: Record<string, unknown>) => { eq: (col: string, val: string) => Promise<unknown> };
+          })
+            .update({ last_contacted_at: now.toISOString() })
+            .eq("id", recipient.patient_id);
+        }
         sentCount++;
       } else {
         await supabase.from("campaign_send_log").update({ status: "failed", error_message: sendResult.error ?? "Unknown error" }).eq("tracking_id", trackingId);

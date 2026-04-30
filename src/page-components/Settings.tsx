@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import {
   Settings as SettingsIcon, Building2, Users, Plug, Mail,
   Save, Trash2, Plus, CheckCircle2, ExternalLink,
-  Clock, Loader2,
+  Clock, Loader2, Tag,
 } from "lucide-react";
 
 function GoogleCalendarIcon({ className }: { className?: string }) {
@@ -593,6 +593,258 @@ function IntegrationsTab({
   );
 }
 
+// ─── Lead Sources Tab (A1.3) ─────────────────────────────────────────────────
+// Megan can add custom values; default rows seeded by migration
+// 20260429000001_phase1_schema.sql cannot be deleted (kept around so analytics
+// doesn't lose comparability) but can be hidden by setting sort_order to a
+// large value. For now we expose add + delete-custom only.
+interface LeadSourceRow {
+  id: string;
+  label: string;
+  is_default: boolean;
+  sort_order: number;
+}
+
+function LeadSourcesTab() {
+  const queryClient = useQueryClient();
+  const [newLabel, setNewLabel] = useState("");
+
+  // Cast supabase to bypass the stale auto-generated types — the lead_sources
+  // table exists in DB but isn't in src/integrations/supabase/types.ts.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lsTable = (supabase as any).from("lead_sources");
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ["lead_sources"],
+    queryFn: async (): Promise<LeadSourceRow[]> => {
+      const { data, error } = await lsTable
+        .select("id, label, is_default, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("label", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as LeadSourceRow[];
+    },
+  });
+
+  const addMut = useMutation({
+    mutationFn: async (label: string) => {
+      const trimmed = label.trim();
+      if (!trimmed) throw new Error("Label cannot be empty");
+      const { error } = await lsTable.insert({ label: trimmed, is_default: false, sort_order: 500 });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setNewLabel("");
+      queryClient.invalidateQueries({ queryKey: ["lead_sources"] });
+      toast.success("Lead source added");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await lsTable.delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lead_sources"] });
+      toast.success("Lead source deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Mail className="h-4 w-4 text-primary" /> Lead Sources
+          </CardTitle>
+          <CardDescription>
+            Where leads are coming from. Add custom values here; new options are
+            available immediately on the Add/Edit Contact form.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Input
+              placeholder="e.g. Pop-up table at expo"
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addMut.mutate(newLabel); }}
+              className="h-9"
+            />
+            <Button
+              onClick={() => addMut.mutate(newLabel)}
+              disabled={addMut.isPending || !newLabel.trim()}
+              size="sm"
+              className="h-9"
+            >
+              Add
+            </Button>
+          </div>
+          <Separator />
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <div className="space-y-1.5">
+              {rows.map((row) => (
+                <div key={row.id} className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">{row.label}</span>
+                    {row.is_default && (
+                      <Badge variant="outline" className="text-[10px] py-0 px-1.5">Default</Badge>
+                    )}
+                  </div>
+                  {!row.is_default && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => delMut.mutate(row.id)}
+                      disabled={delMut.isPending}
+                      className="h-7 text-xs text-destructive hover:text-destructive"
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Practice Links Tab (A2.5) ───────────────────────────────────────────────
+// Saved CTA destinations (booking page, intake form, retreat page, etc.) that
+// the AI Campaign Creator can drop into the call-to-action button without
+// Megan editing every generated email.
+interface PracticeLinkRow {
+  id: string;
+  label: string;
+  url: string;
+  is_default: boolean;
+  sort_order: number;
+}
+
+function PracticeLinksTab() {
+  const queryClient = useQueryClient();
+  const [label, setLabel] = useState("");
+  const [url, setUrl] = useState("");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linksTable = (supabase as any).from("practice_links");
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ["practice_links"],
+    queryFn: async (): Promise<PracticeLinkRow[]> => {
+      const { data, error } = await linksTable
+        .select("id, label, url, is_default, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("label", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as PracticeLinkRow[];
+    },
+  });
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      const l = label.trim();
+      const u = url.trim();
+      if (!l) throw new Error("Label is required");
+      if (!u.startsWith("http")) throw new Error("URL must start with http(s)");
+      const { error } = await linksTable.insert({ label: l, url: u, sort_order: 200 });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setLabel("");
+      setUrl("");
+      queryClient.invalidateQueries({ queryKey: ["practice_links"] });
+      toast.success("Link saved");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await linksTable.delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["practice_links"] });
+      toast.success("Link deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <ExternalLink className="h-4 w-4 text-primary" /> Saved links
+          </CardTitle>
+          <CardDescription>
+            Reusable destination URLs for the AI Campaign Creator&apos;s call-to-action button.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <Input
+              placeholder="Label (e.g. Free consultation)"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="h-9 sm:col-span-1"
+            />
+            <Input
+              placeholder="https://…"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="h-9 sm:col-span-2"
+            />
+          </div>
+          <Button
+            onClick={() => addMut.mutate()}
+            disabled={addMut.isPending || !label.trim() || !url.trim()}
+            size="sm"
+            className="h-9"
+          >
+            Save link
+          </Button>
+          <Separator />
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No saved links yet — add one above.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {rows.map((row) => (
+                <div key={row.id} className="flex items-center justify-between rounded-md border bg-background px-3 py-2 gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{row.label}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{row.url}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => delMut.mutate(row.id)}
+                    disabled={delMut.isPending}
+                    className="h-7 text-xs text-destructive hover:text-destructive shrink-0"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Campaign Defaults Tab ─────────────────────────────────────────────────────
 function CampaignDefaultsTab({ settings, onSave }: { settings: PracticeSettings; onSave: (updates: Partial<PracticeSettings>) => void }) {
   const [form, setForm] = useState({
@@ -756,7 +1008,7 @@ const Settings = () => {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="overflow-x-auto -mx-1 px-1">
-          <TabsList className="grid grid-cols-4 w-full min-w-[340px] max-w-xl">
+          <TabsList className="grid grid-cols-6 w-full min-w-[480px] max-w-3xl">
             <TabsTrigger value="practice">
               <Building2 className="h-3.5 w-3.5 mr-1.5 hidden sm:inline" /> Practice
             </TabsTrigger>
@@ -768,6 +1020,12 @@ const Settings = () => {
             </TabsTrigger>
             <TabsTrigger value="campaigns">
               <Mail className="h-3.5 w-3.5 mr-1.5 hidden sm:inline" /> Campaigns
+            </TabsTrigger>
+            <TabsTrigger value="lead_sources">
+              <Tag className="h-3.5 w-3.5 mr-1.5 hidden sm:inline" /> Sources
+            </TabsTrigger>
+            <TabsTrigger value="links">
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5 hidden sm:inline" /> Links
             </TabsTrigger>
           </TabsList>
         </div>
@@ -783,6 +1041,12 @@ const Settings = () => {
         </TabsContent>
         <TabsContent value="campaigns" className="mt-6">
           <CampaignDefaultsTab settings={settings} onSave={updateSettings.mutate} />
+        </TabsContent>
+        <TabsContent value="lead_sources" className="mt-6">
+          <LeadSourcesTab />
+        </TabsContent>
+        <TabsContent value="links" className="mt-6">
+          <PracticeLinksTab />
         </TabsContent>
       </Tabs>
     </div>
