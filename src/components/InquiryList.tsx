@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { StatusBadge } from "@/components/StatusBadge";
+import { MailPreview } from "@/components/MailFormatter";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import type { InquiryCategory, InquiryStatus } from "@/lib/types";
@@ -183,7 +184,9 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
                       {formatDistanceToNow(new Date(inq.created_at), { addSuffix: true })}
                     </span>
                   </div>
-                  <p className="mb-2 line-clamp-2 text-xs text-muted-foreground">{inq.raw_content}</p>
+                  <div className="mb-2">
+                    <MailPreview content={inq.raw_content} maxLength={100} />
+                  </div>
                   <div className="flex items-center gap-1.5">
                     <CategoryBadge category={inq.category as InquiryCategory} />
                     <StatusBadge status={inq.status as InquiryStatus} />

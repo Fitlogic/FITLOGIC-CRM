@@ -17,8 +17,51 @@ interface GmailMessageDetail {
   snippet: string;
   payload: {
     headers: { name: string; value: string }[];
+    body?: { data?: string; size?: number };
+    parts?: Array<{
+      mimeType: string;
+      body?: { data?: string; size?: number };
+    }>;
   };
   internalDate: string;
+}
+
+// Decode HTML entities like &#8217; to '
+function decodeHtmlEntities(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+// Extract full text content from Gmail message
+function extractBodyText(message: GmailMessageDetail): string {
+  // Try to get text from body
+  if (message.payload.body?.data) {
+    return decodeBase64(message.payload.body.data);
+  }
+  // Try to find text/plain part
+  const textPart = message.payload.parts?.find((p) => p.mimeType === "text/plain");
+  if (textPart?.body?.data) {
+    return decodeBase64(textPart.body.data);
+  }
+  // Fallback to snippet
+  return message.snippet || "";
+}
+
+function decodeBase64(data: string): string {
+  try {
+    // Gmail uses URL-safe base64
+    const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+    return decodeURIComponent(escape(atob(normalized)));
+  } catch {
+    return "";
+  }
 }
 
 function extractEmail(from: string): string {
@@ -108,7 +151,7 @@ export async function POST() {
       const results = await Promise.all(
         batch.map(async (id) => {
           const r = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
           if (!r.ok) return null;
@@ -124,12 +167,13 @@ export async function POST() {
     const toInsert = newMessages.map((d) => {
       const headers = d.payload.headers;
       const fromHeader = headers.find((h) => h.name === "From")?.value ?? "";
-      const subject = headers.find((h) => h.name === "Subject")?.value ?? "(no subject)";
+      const subject = decodeHtmlEntities(headers.find((h) => h.name === "Subject")?.value ?? "(no subject)");
       const senderEmail = extractEmail(fromHeader);
       const patient = patientsByEmail.get(senderEmail);
       const senderName = fromHeader.replace(/<[^>]+>/, "").replace(/"/g, "").trim() || senderEmail;
+      const bodyText = decodeHtmlEntities(extractBodyText(d));
 
-      return { messageId: d.id, senderEmail, senderName, patient, subject, snippet: d.snippet };
+      return { messageId: d.id, senderEmail, senderName, patient, subject, bodyText };
     });
 
     if (!toInsert.length) {
@@ -142,16 +186,35 @@ export async function POST() {
       patient_id: e.patient?.id ?? null,
       patient_name: e.patient ? `${e.patient.first_name} ${e.patient.last_name}`.trim() : e.senderName,
       patient_email: e.senderEmail,
-      raw_content: `${e.subject}\n\n${e.snippet}`,
+      raw_content: `${e.subject}\n\n${e.bodyText}`,
       status: "pending",
       category: "General_Info",
     }));
 
-    const { error: insertErr } = await sb.from("inquiries").insert(rows as never[]);
-    if (insertErr) throw insertErr;
+    // Insert in batches, ignoring duplicate key errors (race condition handling)
+    const BATCH_SIZE = 10;
+    let inserted = 0;
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      const { error: insertErr } = await sb.from("inquiries").insert(batch as never[]);
+      if (insertErr) {
+        if (insertErr.code === "23505") {
+          // Duplicate key - some rows already exist, insert one by one to skip duplicates
+          for (const row of batch) {
+            const { error: singleErr } = await sb.from("inquiries").insert(row as never);
+            if (!singleErr) inserted++;
+            // Ignore 23505 errors for individual rows
+          }
+        } else {
+          throw insertErr;
+        }
+      } else {
+        inserted += batch.length;
+      }
+    }
 
     const contactsMatched = toInsert.filter((e) => e.patient).length;
-    return NextResponse.json({ synced: rows.length, contacts_matched: contactsMatched, unknown_senders: rows.length - contactsMatched });
+    return NextResponse.json({ synced: inserted, contacts_matched: contactsMatched, unknown_senders: toInsert.length - contactsMatched });
   } catch (err) {
     console.error("sync-gmail error:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "Unknown error" }, { status: 500 });

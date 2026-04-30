@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { MailFormatter } from "@/components/MailFormatter";
 import type { InquiryRow } from "@/components/InquiryList";
 import type { InquiryCategory, InquiryStatus } from "@/lib/types";
 
@@ -191,9 +192,12 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
-        <div className="rounded-lg bg-muted/50 p-4">
-          <p className="text-sm leading-relaxed">{inquiry.raw_content}</p>
-        </div>
+        <MailFormatter
+          content={inquiry.raw_content}
+          patientName={inquiry.patient_name}
+          patientEmail={inquiry.patient_email || undefined}
+          createdAt={inquiry.created_at}
+        />
 
         {inquiry.is_faq_match && inquiry.response_text && (
           <div className="rounded-lg border border-status-auto/30 bg-status-auto/5 p-4">

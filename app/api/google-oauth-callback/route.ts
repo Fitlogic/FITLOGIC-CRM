@@ -57,19 +57,29 @@ export async function POST(req: NextRequest) {
     }
 
     const sb = serverClient();
-    const { data: settingsRow, error: fetchErr } = await sb
+    // Get existing row or create default one
+    let { data: settingsRow } = await sb
       .from("practice_settings")
       .select("id")
       .limit(1)
       .single();
 
-    if (fetchErr || !settingsRow) {
-      return NextResponse.json({ error: "practice_settings row not found" }, { status: 500 });
+    if (!settingsRow) {
+      // Create default row
+      const { data: newRow, error: insertErr } = await sb
+        .from("practice_settings")
+        .insert({ practice_name: "FitLogic Practice" })
+        .select("id")
+        .single();
+      if (insertErr) {
+        return NextResponse.json({ error: "Failed to create practice_settings: " + insertErr.message }, { status: 500 });
+      }
+      settingsRow = newRow;
     }
 
     const { error: updateErr } = await sb
       .from("practice_settings")
-      .update(updates)
+      .update(updates as any)
       .eq("id", settingsRow.id);
 
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
