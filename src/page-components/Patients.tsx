@@ -8,8 +8,7 @@ import { QK } from "@/lib/queryKeys";
 import { toast } from "@/hooks/use-toast";
 import {
   Users, Plus, Search, MoreHorizontal, Mail, Building2,
-  Eye, Pencil, Trash2, ChevronLeft, ArrowUpDown, Tag, StickyNote,
-  TrendingUp, Send, X, Filter, Upload, Download,
+  Eye, Pencil, Trash2, ChevronLeft, ArrowUpDown, Tag, StickyNote, TrendingUp, Send, X, Filter, Upload, Download, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +17,9 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
@@ -34,6 +34,7 @@ import { Separator } from "@/components/ui/separator";
 import { PatientForm, type PatientFormData } from "@/components/PatientForm";
 import { PatientTimeline } from "@/components/PatientTimeline";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
+import { RichEmailEditor, type EmailAttachment } from "@/components/RichEmailEditor";
 
 type Patient = {
   id: string;
@@ -292,6 +293,14 @@ export default function Patients() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
+  // Email compose state
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composePatient, setComposePatient] = useState<Patient | null>(null);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [emailAttachments, setEmailAttachments] = useState<EmailAttachment[]>([]);
+  const [sending, setSending] = useState(false);
+
   // Persist filters to sessionStorage
   useEffect(() => {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ search, statusFilter, stageFilter, sourceFilter, sortBy }));
@@ -542,7 +551,7 @@ export default function Patients() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setViewing(null); setDetailTab("overview"); router.replace("/contacts"); }} className="gap-1 text-muted-foreground hover:text-foreground">
+          <Button variant="ghost" size="sm" onClick={() => { setViewing(null); setDetailTab("overview"); router.push("/contacts"); }} className="gap-1 text-muted-foreground hover:text-foreground">
             <ChevronLeft className="h-4 w-4" /> Contacts
           </Button>
         </div>
@@ -567,8 +576,18 @@ export default function Patients() {
           </div>
           <div className="flex gap-2">
             {p.email && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={`mailto:${p.email}`}><Mail className="h-3.5 w-3.5 mr-1" /> Email</a>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setComposePatient(p);
+                  setEmailSubject("");
+                  setEmailBody(`<p>Hi ${p.first_name || ''},</p><p><br></p><p>Best regards,</p>`);
+                  setEmailAttachments([]);
+                  setComposeOpen(true);
+                }}
+              >
+                <Mail className="h-3.5 w-3.5 mr-1" /> Email
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => { setEditing(p); setFormOpen(true); }}>
@@ -1128,7 +1147,7 @@ export default function Patients() {
               </TableHeader>
               <TableBody>
                 {filtered.map((p) => (
-                  <TableRow key={p.id} className={`cursor-pointer group ${selected.has(p.id) ? "bg-primary/5" : ""}`} onClick={() => setViewing(p)}>
+                  <TableRow key={p.id} className={`cursor-pointer group ${selected.has(p.id) ? "bg-primary/5" : ""}`} onClick={() => router.push(`/contacts?id=${p.id}`)}>
                     <TableCell className="p-0" onClick={(e) => { e.stopPropagation(); toggleSelect(p.id); }}>
                       <label className="flex items-center justify-center w-full h-full min-h-[44px] cursor-pointer px-3">
                         <input
@@ -1183,7 +1202,7 @@ export default function Patients() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setViewing(p)}>
+                          <DropdownMenuItem onClick={() => router.push(`/contacts?id=${p.id}`)}>
                             <Eye className="h-3.5 w-3.5 mr-2" /> View
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setEditing(p); setFormOpen(true); }}>
@@ -1293,6 +1312,104 @@ export default function Patients() {
 
       {/* Bulk Import */}
       <BulkImportDialog open={importOpen} onOpenChange={setImportOpen} />
+
+      {/* Email Compose Dialog */}
+      <Dialog open={composeOpen} onOpenChange={setComposeOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5" />
+              Compose Email
+            </DialogTitle>
+            <DialogDescription>
+              {composePatient && `To: ${composePatient.first_name} ${composePatient.last_name} <${composePatient.email}>`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="subject">Subject</Label>
+              <Input
+                id="subject"
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                placeholder="Enter email subject..."
+                className="mt-1"
+              />
+            </div>
+
+            <div>
+              <Label>Message</Label>
+              <div className="mt-1">
+                <RichEmailEditor
+                  value={emailBody}
+                  onChange={setEmailBody}
+                  subject={emailSubject}
+                  minHeight={250}
+                  attachments={emailAttachments}
+                  onAttachmentsChange={setEmailAttachments}
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={sending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!composePatient?.email || !emailSubject || !emailBody) return;
+                
+                setSending(true);
+                try {
+                  const res = await fetch("/api/send-gmail", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      to: composePatient.email,
+                      toName: `${composePatient.first_name} ${composePatient.last_name}`.trim(),
+                      subject: emailSubject,
+                      html: emailBody,
+                      attachments: emailAttachments,
+                    }),
+                  });
+
+                  const data = await res.json();
+
+                  if (data.success) {
+                    toast({ title: `Email sent to ${composePatient.first_name || composePatient.email}` });
+                    setComposeOpen(false);
+                    setEmailSubject("");
+                    setEmailBody("");
+                    setEmailAttachments([]);
+                  } else {
+                    toast({ title: data.error || "Failed to send email", variant: "destructive" });
+                  }
+                } catch (err) {
+                  toast({ title: "Failed to send email", variant: "destructive" });
+                  console.error(err);
+                } finally {
+                  setSending(false);
+                }
+              }}
+              disabled={sending || !emailSubject || !emailBody}
+            >
+              {sending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="h-4 w-4 mr-1.5" />
+                  Send Email
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

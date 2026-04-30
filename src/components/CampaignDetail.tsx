@@ -710,48 +710,71 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
 
       {/* Email Editor Dialog */}
       <Dialog open={!!editingEmail} onOpenChange={v => { if (!v) setEditingEmail(null); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
+        <DialogContent className="max-w-5xl w-[90vw] max-h-[90vh] p-0 flex flex-col overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
             <DialogTitle>
               {editingEmail?.type === "sequence" ? `Edit Step ${editingEmail.stepNumber}` : "Edit Email"}
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
-            <div>
-              <Label className="text-xs">Subject Line</Label>
-              <Input
-                className="mt-1 h-9 text-sm"
-                value={editingEmail?.subject ?? ""}
-                onChange={e => setEditingEmail(p => p ? { ...p, subject: e.target.value } : p)}
-                placeholder="Email subject…"
-              />
-            </div>
-            {editingEmail?.type === "template" && (
+
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-y-auto px-6 py-2 min-h-0">
+            <div className="space-y-4">
               <div>
-                <Label className="text-xs">Preview Text</Label>
+                <Label className="text-xs">Subject Line</Label>
                 <Input
                   className="mt-1 h-9 text-sm"
-                  value={editingEmail?.previewText ?? ""}
-                  onChange={e => setEditingEmail(p => p ? { ...p, previewText: e.target.value } : p)}
-                  placeholder="Short preview shown in inbox…"
+                  value={editingEmail?.subject ?? ""}
+                  onChange={e => setEditingEmail(p => p ? { ...p, subject: e.target.value } : p)}
+                  placeholder="Email subject…"
                 />
               </div>
-            )}
-            <div className="flex-1">
-              <Label className="text-xs">Email Body</Label>
-              <div className="mt-1">
-                <RichEmailEditor
-                  value={editingEmail?.bodyHtml ?? ""}
-                  onChange={(html) => setEditingEmail(p => p ? { ...p, bodyHtml: html } : p)}
-                  subject={editingEmail?.subject}
-                  previewText={editingEmail?.previewText}
-                  placeholder="Write your email here. Use double Enter for paragraphs. Click 'Insert Variable' to personalize with contact data."
-                  minHeight={280}
-                />
+              {editingEmail?.type === "template" && (
+                <div>
+                  <Label className="text-xs">Preview Text</Label>
+                  <Input
+                    className="mt-1 h-9 text-sm"
+                    value={editingEmail?.previewText ?? ""}
+                    onChange={e => setEditingEmail(p => p ? { ...p, previewText: e.target.value } : p)}
+                    placeholder="Short preview shown in inbox…"
+                  />
+                </div>
+              )}
+
+              {/* Two-column layout: Editor + Preview */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Editor side */}
+                <div className="flex flex-col">
+                  <Label className="text-xs mb-2">Email Body</Label>
+                  <div className="flex-1 min-h-[300px]">
+                    <RichEmailEditor
+                      value={editingEmail?.bodyHtml ?? ""}
+                      onChange={(html) => setEditingEmail(p => p ? { ...p, bodyHtml: html } : p)}
+                      subject={editingEmail?.subject}
+                      previewText={editingEmail?.previewText}
+                      placeholder="Write your email here. Use double Enter for paragraphs. Click 'Insert Variable' to personalize with contact data."
+                      minHeight={280}
+                    />
+                  </div>
+                </div>
+                {/* Live preview side */}
+                <div className="flex flex-col">
+                  <Label className="text-xs mb-2">Live Preview</Label>
+                  <div className="flex-1 border rounded-lg bg-white dark:bg-gray-50 p-4 overflow-auto min-h-[300px]">
+                    <div className="text-sm font-semibold mb-2 text-foreground">{editingEmail?.subject || "(No subject)"}</div>
+                    {editingEmail?.previewText && <div className="text-xs text-muted-foreground mb-3">{editingEmail.previewText}</div>}
+                    <div
+                      className="prose prose-sm max-w-none"
+                      style={{ color: "#374151" }}
+                      dangerouslySetInnerHTML={{ __html: editingEmail?.bodyHtml || "<p class='text-muted-foreground italic'>No content yet</p>" }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="px-6 py-4 border-t shrink-0">
             <Button variant="outline" onClick={() => setEditingEmail(null)}>Cancel</Button>
             <Button
               className="gradient-brand text-primary-foreground"

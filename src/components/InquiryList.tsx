@@ -183,7 +183,11 @@ export function InquiryList({ inquiries, selectedId, onSelect }: Props) {
                       {formatDistanceToNow(new Date(inq.created_at), { addSuffix: true })}
                     </span>
                   </div>
-                  <p className="mb-2 line-clamp-2 text-xs text-muted-foreground">{inq.raw_content}</p>
+                  <p className="mb-2 line-clamp-2 text-xs text-muted-foreground">
+                    {typeof window !== "undefined"
+                      ? new DOMParser().parseFromString(inq.raw_content ?? "", "text/html").documentElement.textContent ?? inq.raw_content
+                      : inq.raw_content}
+                  </p>
                   <div className="flex items-center gap-1.5">
                     <CategoryBadge category={inq.category as InquiryCategory} />
                     <StatusBadge status={inq.status as InquiryStatus} />

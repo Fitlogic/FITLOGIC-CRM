@@ -12,6 +12,7 @@ import {
   Search, Trash2, Copy, MousePointerClick, Sparkles, Layers, X, Filter
 } from "lucide-react";
 import { EmailPreview } from "@/components/EmailPreview";
+import { RichEmailEditor } from "@/components/RichEmailEditor";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -1094,16 +1095,26 @@ const Campaigns_Page = () => {
                 </div>
                 <div><Label className="text-sm">Subject Line</Label><Input value={editingTemplate?.subject || ""} onChange={e => setEditingTemplate(p => ({ ...p, subject: e.target.value }))} /></div>
                 <div><Label className="text-sm">Preview Text</Label><Input value={editingTemplate?.preview_text || ""} onChange={e => setEditingTemplate(p => ({ ...p, preview_text: e.target.value }))} /></div>
-                <div><Label className="text-sm">Body HTML</Label><Textarea value={editingTemplate?.body_html || ""} onChange={e => setEditingTemplate(p => ({ ...p, body_html: e.target.value }))} className="min-h-[250px] font-mono text-xs" /></div>
+                <div><Label className="text-sm">Body HTML</Label>
+                  <RichEmailEditor
+                    value={editingTemplate?.body_html || ""}
+                    onChange={(html) => setEditingTemplate(p => ({ ...p, body_html: html }))}
+                    subject={editingTemplate?.subject || ""}
+                    minHeight={250}
+                  />
+                </div>
               </div>
               {/* Live preview side */}
               <div>
                 <Label className="text-sm mb-2 block">Live Preview</Label>
-                <EmailPreview
-                  html={editingTemplate?.body_html || ""}
-                  subject={editingTemplate?.subject || ""}
-                  previewText={editingTemplate?.preview_text || ""}
-                />
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="text-sm font-semibold mb-2">{editingTemplate?.subject || "(No subject)"}</div>
+                  {editingTemplate?.preview_text && <div className="text-xs text-muted-foreground mb-3">{editingTemplate.preview_text}</div>}
+                  <div
+                    className="prose prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: editingTemplate?.body_html || "<p class='text-muted-foreground italic'>No content yet</p>" }}
+                  />
+                </div>
               </div>
             </div>
           </ScrollArea>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Mail, Globe, Phone, PenLine, Clock, User, Send, AlertTriangle, CheckCircle, Bot, Sparkles, Loader2 } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Mail, Globe, Phone, PenLine, Clock, User, Send, AlertTriangle, CheckCircle, Bot, Sparkles, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -31,6 +31,38 @@ interface StaffRow {
 interface Props {
   inquiry: InquiryRow;
   onUpdate: (id: string, updates: Partial<InquiryRow>) => void;
+}
+
+function decodeHtmlEntities(text: string): string {
+  const doc = typeof window !== "undefined"
+    ? new DOMParser().parseFromString(text, "text/html")
+    : null;
+  return doc ? doc.documentElement.textContent ?? text : text;
+}
+
+function MessageBody({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  
+  const decoded = useMemo(() => decodeHtmlEntities(content ?? ""), [content]);
+  const isLong = decoded.length > 400;
+  const preview = isLong && !expanded ? decoded.slice(0, 400) + "…" : decoded;
+
+  return (
+    <div className="px-6 py-4 border-b bg-muted/20">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Message</p>
+      <p className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">{preview}</p>
+      {isLong && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-2 h-7 px-2 text-xs gap-1 text-primary"
+          onClick={() => setExpanded(e => !e)}
+        >
+          {expanded ? <><ChevronUp className="h-3.5 w-3.5" /> Show less</> : <><ChevronDown className="h-3.5 w-3.5" /> Show full message</>}
+        </Button>
+      )}
+    </div>
+  );
 }
 
 export function InquiryDetail({ inquiry, onUpdate }: Props) {
@@ -190,10 +222,8 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
         </div>
       </div>
 
+      <MessageBody content={inquiry.raw_content} />
       <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
-        <div className="rounded-lg bg-muted/50 p-4">
-          <p className="text-sm leading-relaxed">{inquiry.raw_content}</p>
-        </div>
 
         {inquiry.is_faq_match && inquiry.response_text && (
           <div className="rounded-lg border border-status-auto/30 bg-status-auto/5 p-4">
