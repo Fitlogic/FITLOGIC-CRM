@@ -257,7 +257,7 @@ export async function POST(req: Request) {
       raw_content: `Subject: ${subject}\n\n${html}`,
       status: "resolved",
       category: "Sent_Email",
-    });
+    } as any);
 
     return NextResponse.json({
       success: true,
