@@ -10,7 +10,7 @@ import {
   Users, Plus, Search, MoreHorizontal, Mail, Building2,
   Eye, Pencil, Trash2, ChevronLeft, ArrowUpDown, Tag, StickyNote,
   TrendingUp, Send, X, Filter, Upload, Download, Clock, FlaskConical, MapPin,
-  Loader2,
+  Loader2, ChevronsDown, ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -354,7 +354,7 @@ export default function Patients() {
     setDisplayPage(1);
   }, [search, statusFilter, stageFilter, sourceFilter, sortBy, contactFilter, stateFilter]);
 
-  const { data: patients = [], isLoading } = useQuery({
+  const { data: patients = [], isLoading, isFetching } = useQuery({
     queryKey: [...QK.patients, page],
     queryFn: async () => {
       const from = page * PAGE_SIZE;
@@ -368,6 +368,20 @@ export default function Patients() {
       if ((data?.length ?? 0) < PAGE_SIZE) setAllLoaded(true);
       return data as Patient[];
     },
+  });
+
+  // Total count of contacts on the server — drives the "X of Y loaded" copy
+  // and progress bar on the prominent Load more card.
+  const { data: totalContactCount = 0 } = useQuery({
+    queryKey: [...QK.patients, "count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("patients")
+        .select("id", { count: "exact", head: true });
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 60_000,
   });
 
   // Accumulate pages
@@ -1421,25 +1435,67 @@ export default function Patients() {
         </CardContent>
       </Card>
 
+      {/* Prominent Load more — surfaced above pagination so missing contacts
+          are obvious. The smaller secondary count line stays underneath. */}
+      {!allLoaded && allPatients.length > 0 && (
+        <button
+          onClick={() => setPage((p) => p + 1)}
+          disabled={isFetching}
+          className="group w-full rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/5 via-primary/[0.02] to-transparent hover:from-primary/10 hover:border-primary/50 transition-all px-6 py-5 text-left disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                {isFetching ? (
+                  <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                ) : (
+                  <ChevronsDown className="h-5 w-5 text-primary" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-foreground">
+                  {isFetching ? "Loading more contacts…" : "Load more contacts"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {totalContactCount > 0 ? (
+                    <>
+                      Showing <strong className="text-foreground">{allPatients.length.toLocaleString()}</strong> of{" "}
+                      <strong className="text-foreground">{totalContactCount.toLocaleString()}</strong> total contacts. Click to load the next {Math.min(PAGE_SIZE, totalContactCount - allPatients.length).toLocaleString()}.
+                    </>
+                  ) : (
+                    `Click to load the next ${PAGE_SIZE} contacts.`
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="hidden sm:flex shrink-0 items-center gap-2 text-xs font-semibold text-primary">
+              <span>Load batch</span>
+              <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </div>
+          {totalContactCount > 0 && (
+            <div className="mt-4 h-1.5 rounded-full bg-primary/10 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${Math.min(100, (allPatients.length / totalContactCount) * 100)}%` }}
+              />
+            </div>
+          )}
+        </button>
+      )}
+
+      {allLoaded && allPatients.length > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          All {allPatients.length.toLocaleString()} contacts loaded
+        </div>
+      )}
+
       {/* Pagination + Summary */}
       <div className="flex flex-col items-center gap-4">
         {filtered.length > 0 && (
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span>
-              Showing {((displayPage - 1) * itemsPerPage) + 1}-{Math.min(displayPage * itemsPerPage, filtered.length)} of {filtered.length} filtered
-              {allPatients.length < filtered.length + (allLoaded ? 0 : 500) && ` (${allPatients.length} loaded)`}
-            </span>
-            {!allLoaded && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 text-xs px-2"
-                onClick={() => setPage((p) => p + 1)}
-                disabled={isLoading}
-              >
-                {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Load more data"}
-              </Button>
-            )}
+          <div className="text-xs text-muted-foreground">
+            Showing {((displayPage - 1) * itemsPerPage) + 1}-{Math.min(displayPage * itemsPerPage, filtered.length)} of {filtered.length.toLocaleString()} filtered
           </div>
         )}
 
@@ -1671,7 +1727,7 @@ export default function Patients() {
               if (!composePatient?.email || !composeText.trim()) return;
               setSendingEmail(true);
               try {
-                const res = await fetch("/api/send-gmail", {
+                const res = await fetch("/api/send-email", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({

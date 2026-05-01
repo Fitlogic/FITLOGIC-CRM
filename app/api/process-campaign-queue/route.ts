@@ -1,95 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
-
-interface EmailPayload {
-  to: string;
-  toName: string | null;
-  subject: string;
-  html: string;
-  from: string;
-  listUnsubscribeUrl: string;
-  trackingId: string;
-}
-
-interface SendResult {
-  success: boolean;
-  messageId?: string;
-  error?: string;
-  provider?: "resend" | "gmail";
-}
-
-async function sendViaResend(apiKey: string, payload: EmailPayload): Promise<SendResult> {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      from: payload.from,
-      to: payload.toName ? [`${payload.toName} <${payload.to}>`] : [payload.to],
-      subject: payload.subject,
-      html: payload.html,
-      headers: {
-        "List-Unsubscribe": `<${payload.listUnsubscribeUrl}>`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-        "X-Tracking-ID": payload.trackingId,
-      },
-    }),
-  });
-  if (res.ok) { const data = await res.json(); return { success: true, messageId: data.id }; }
-  return { success: false, error: `Resend ${res.status}: ${await res.text()}` };
-}
-
-// Send via Gmail API using our internal endpoint
-async function sendViaGmail(payload: EmailPayload, baseUrl: string): Promise<SendResult> {
-  try {
-    const res = await fetch(`${baseUrl}/api/send-gmail`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: payload.to,
-        toName: payload.toName,
-        subject: payload.subject,
-        html: payload.html,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return { success: true, messageId: data.messageId };
-    }
-    return { success: false, error: `Gmail ${res.status}: ${await res.text()}` };
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-async function sendEmail(
-  apiKey: string,
-  payload: EmailPayload,
-  baseUrl: string,
-  hasGmail: boolean
-): Promise<SendResult> {
-  // Try Resend first
-  const resendResult = await sendViaResend(apiKey, payload);
-  if (resendResult.success) {
-    return { ...resendResult, provider: "resend" };
-  }
-
-  // Fall back to Gmail if available
-  if (hasGmail) {
-    console.log(`Resend failed (${resendResult.error}), trying Gmail fallback...`);
-    const gmailResult = await sendViaGmail(payload, baseUrl);
-    if (gmailResult.success) {
-      return { ...gmailResult, provider: "gmail" };
-    }
-    // Return combined error if both fail
-    return {
-      success: false,
-      error: `Resend: ${resendResult.error}; Gmail: ${gmailResult.error}`,
-    };
-  }
-
-  return resendResult;
-}
+import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
 
 async function updateCampaignStats(supabase: SupabaseClient, campaignId: string) {
   const { data } = await supabase.from("campaign_send_log").select("status, opened_at, clicked_at").eq("campaign_id", campaignId);
@@ -103,9 +15,12 @@ async function updateCampaignStats(supabase: SupabaseClient, campaignId: string)
   await supabase.from("campaigns").update({ stats }).eq("id", campaignId);
 }
 
-// Hardcoded Texas timezone for 8am daily sends
+// Hardcoded Texas timezone for ~8am daily sends.
+// Vercel cron is UTC-only ("0 14 * * *" = 14:00 UTC). That is 8am CST in winter
+// but 9am CDT in summer. Accept either hour so DST does not silently skip an
+// entire half of the year.
 const TEXAS_TIMEZONE = "America/Chicago";
-const SEND_HOUR = 8; // 8:00 AM Texas time
+const SEND_HOURS = [8, 9];
 
 export async function POST(req: NextRequest) {
   const supabase = serverClient();
@@ -153,9 +68,9 @@ export async function POST(req: NextRequest) {
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const currentDay = dayNames[texasNow.getDay()];
 
-    // Only process if it's around 8am Texas time
-    if (currentHour !== SEND_HOUR) {
-      return NextResponse.json({ message: `Skipped - current Texas time is ${currentHour}:00, not ${SEND_HOUR}:00` });
+    // Only process during the 8–9am Texas window (covers CST + CDT).
+    if (!SEND_HOURS.includes(currentHour)) {
+      return NextResponse.json({ message: `Skipped - current Texas time is ${currentHour}:00, outside send window ${SEND_HOURS.join("/")}` });
     }
 
     // Get today's date in Texas timezone for duplicate prevention
@@ -369,7 +284,9 @@ export async function POST(req: NextRequest) {
             .replace(/\{email\}/gi, recipient.email);
 
         subject = applyVars(subject);
-        bodyHtml = applyVars(bodyHtml);
+        // Sanitize after variable replacement so injected values (e.g. a
+        // first_name containing <script>) are also stripped.
+        bodyHtml = sanitizeEmailHtml(applyVars(bodyHtml));
 
         const trackingId = crypto.randomUUID();
         const trackBase = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api`;
@@ -381,16 +298,11 @@ export async function POST(req: NextRequest) {
           return `href="${clickUrl}"`;
         });
 
-        const finalHtml = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-  <tr><td>${trackedBody}</td></tr>
-  <tr><td><img src="${trackPixel}" width="1" height="1" style="display:block" alt="" /></td></tr>
-  <tr>
-    <td style="padding-top:32px; border-top:1px solid #e5e7eb; text-align:center; font-size:11px; color:#9ca3af; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <p style="margin:0 0 8px;">You received this email because you opted in.</p>
-      <a href="${unsubLink}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a>
-    </td>
-  </tr>
-</table>`;
+        const finalHtml = wrapEmailHtml({
+          bodyFragment: trackedBody,
+          trackingPixelUrl: trackPixel,
+          unsubscribeUrl: unsubLink,
+        });
 
         await supabase.from("campaign_send_log").insert({ campaign_id: campaign.id, recipient_id: recipient.id, step_number: stepNumber, status: "queued", tracking_id: trackingId });
 

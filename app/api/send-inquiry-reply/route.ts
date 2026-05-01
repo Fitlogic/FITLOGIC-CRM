@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
+import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
 
-// Replace template variables like {{first_name}} with actual values
 function replaceVariables(
   template: string,
-  variables?: Record<string, string | number | null | undefined>
+  variables?: Record<string, string | number | null | undefined>,
 ): string {
   if (!variables) return template;
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
@@ -36,69 +36,58 @@ export async function POST(req: NextRequest) {
       .limit(1)
       .single();
 
+    const resendApiKey: string = process.env.RESEND_API_KEY ?? settings?.email_provider_api_key ?? "";
     const fromAddress: string = process.env.FROM_EMAIL ?? settings?.email_from_address ?? "";
     const fromName: string = settings?.email_from_name ?? "FitLogic";
-
-    // Use Gmail API if connected, otherwise fall back to Resend
+    const fromHeader = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
     const hasGmail = !!settings?.google_gmail_token;
-    // Apply variable replacement
+
+    if (!resendApiKey && !hasGmail) {
+      return NextResponse.json({ error: "Email provider not configured" }, { status: 500 });
+    }
+
     const processedReplyText = replaceVariables(reply_text, variables);
-    const html = html_content ? replaceVariables(html_content, variables) : `<p>${processedReplyText.replace(/\n/g, "<br>")}</p>`;
+    const rawBody = html_content
+      ? replaceVariables(html_content, variables)
+      : `<p>${processedReplyText.replace(/\n/g, "<br>")}</p>`;
     const signature = `<p style="margin-top:24px;font-size:12px;color:#888;border-top:1px solid #eee;padding-top:12px;">
   Fit Logic · <a href="mailto:${fromAddress}" style="color:#888;">${fromAddress}</a>
 </p>`;
-    const fullHtml = html + signature;
+    const safeBody = sanitizeEmailHtml(rawBody + signature);
+    const fullHtml = wrapEmailHtml({ bodyFragment: safeBody });
 
-    if (hasGmail) {
-      // Use send-gmail endpoint
-      const sendRes = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || req.headers.get("origin") || "http://localhost:3000"}/api/send-gmail`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: inquiry.patient_email,
-          toName: inquiry.patient_name,
-          subject: `Re: Your message to Fit Logic`,
-          html: fullHtml,
-        }),
-      });
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      req.headers.get("origin") ||
+      "http://localhost:3000";
 
-      if (!sendRes.ok) {
-        const errData = await sendRes.json().catch(() => ({ error: "Unknown error" }));
-        return NextResponse.json({ error: `Gmail send failed: ${errData.error}` }, { status: 502 });
-      }
-    } else {
-      // Fall back to Resend
-      const emailApiKey: string = process.env.RESEND_API_KEY ?? settings?.email_provider_api_key ?? "";
-      if (!emailApiKey || !fromAddress) {
-        return NextResponse.json({ error: "Email provider not configured" }, { status: 500 });
-      }
+    const result = await sendEmail(
+      resendApiKey,
+      {
+        to: inquiry.patient_email,
+        toName: inquiry.patient_name ?? null,
+        subject: "Re: Your message to Fit Logic",
+        html: fullHtml,
+        from: fromHeader || undefined,
+      },
+      baseUrl,
+      hasGmail,
+    );
 
-      const fromHeader = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${emailApiKey}` },
-        body: JSON.stringify({
-          from: fromHeader,
-          to: [inquiry.patient_email],
-          subject: `Re: Your message to Fit Logic`,
-          html: fullHtml,
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        return NextResponse.json({ error: `Email send failed: ${errText}` }, { status: 502 });
-      }
+    if (!result.success) {
+      return NextResponse.json({ error: `Email send failed: ${result.error}` }, { status: 502 });
     }
 
-    const updates = {
-      response_text: processedReplyText,
-      status: "resolved",
-      resolved_at: new Date().toISOString(),
-    };
-    await sb.from("inquiries").update(updates).eq("id", inquiry_id);
+    await sb
+      .from("inquiries")
+      .update({
+        response_text: processedReplyText,
+        status: "resolved",
+        resolved_at: new Date().toISOString(),
+      })
+      .eq("id", inquiry_id);
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, provider: result.provider });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

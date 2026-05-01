@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { QK } from "@/lib/queryKeys";
@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import {
   LayoutDashboard, Users, Mail, TrendingUp, ArrowRight,
   Share2, Plus, GripVertical, Target, ChevronDown, Maximize2, X, Search, ArrowRightLeft,
+  Loader2, DollarSign, Calendar, Building2, ChevronsDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,10 @@ type ContactRow = {
   status: string;
   pipeline_stage: string | null;
   created_at: string;
+  company: string | null;
+  deal_value: number | null;
+  lead_source: string | null;
+  last_contacted_at: string | null;
 };
 
 function fmt$(v: number | null) {
@@ -234,7 +239,7 @@ function KanbanColumn({
   );
 }
 
-// ─── Stage Detail Sheet ────────────────────────────────────────────────────────
+// ─── Stage Detail Sheet (expanded format) ──────────────────────────────────────
 function StageSheet({
   stage,
   contacts,
@@ -244,6 +249,11 @@ function StageSheet({
   onDrop,
   onTransfer,
   draggingId,
+  onLoadMore,
+  hasMore,
+  loadingMore,
+  totalContactCount,
+  loadedCount,
 }: {
   stage: typeof PIPELINE_STAGES[number] | null;
   contacts: ContactRow[];
@@ -253,59 +263,157 @@ function StageSheet({
   onDrop: (stageKey: string) => void;
   onTransfer: (contactId: string, toStage: string) => void;
   draggingId: string | null;
+  onLoadMore: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  totalContactCount: number;
+  loadedCount: number;
 }) {
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "name" | "deal_high" | "deal_low">("newest");
   const [dragOver, setDragOver] = useState(false);
 
-  const filtered = contacts.filter((c) => {
+  // Reset search/sort when switching stages
+  useEffect(() => {
+    if (stage) { setSearch(""); setSortBy("newest"); }
+  }, [stage?.key]);
+
+  const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return !q || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) || (c.email ?? "").toLowerCase().includes(q);
-  });
+    const list = contacts.filter((c) => {
+      if (!q) return true;
+      return (
+        `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
+        (c.email ?? "").toLowerCase().includes(q) ||
+        (c.company ?? "").toLowerCase().includes(q)
+      );
+    });
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      switch (sortBy) {
+        case "oldest":
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case "name":
+          return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+        case "deal_high":
+          return (b.deal_value ?? 0) - (a.deal_value ?? 0);
+        case "deal_low":
+          return (a.deal_value ?? 0) - (b.deal_value ?? 0);
+        case "newest":
+        default:
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+    });
+    return sorted;
+  }, [contacts, search, sortBy]);
+
+  const totalDealValue = useMemo(
+    () => contacts.reduce((s, c) => s + (c.deal_value ?? 0), 0),
+    [contacts],
+  );
+  const avgDealValue = contacts.length > 0 ? totalDealValue / contacts.length : 0;
+  const withDealValue = contacts.filter((c) => (c.deal_value ?? 0) > 0).length;
 
   return (
     <Sheet open={!!stage} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-full sm:w-[440px] p-0 flex flex-col">
-        <SheetHeader className="px-5 pt-5 pb-3 border-b shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {stage && <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${stage.dot}`} />}
-              <SheetTitle className="text-base">{stage?.label}</SheetTitle>
-              <span className="text-[11px] bg-muted text-muted-foreground rounded-full px-2 py-0.5 border font-medium">
-                {contacts.length} contact{contacts.length !== 1 ? "s" : ""}
+      <SheetContent side="right" className="w-full sm:w-[560px] p-0 flex flex-col">
+        {/* Coloured banner */}
+        {stage && <div className={`h-1.5 ${stage.accent} shrink-0`} />}
+
+        <SheetHeader className="px-6 pt-5 pb-4 border-b shrink-0 space-y-4">
+          {/* Title row */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {stage && <span className={`h-3 w-3 rounded-full shrink-0 ${stage.dot}`} />}
+              <SheetTitle className="text-lg font-heading">{stage?.label}</SheetTitle>
+              <span className="text-xs bg-muted text-muted-foreground rounded-full px-2.5 py-0.5 border font-semibold">
+                {contacts.length}
               </span>
             </div>
-            <button onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
+            <button
+              onClick={onClose}
+              className="rounded-md p-1.5 hover:bg-muted transition-colors shrink-0"
+              aria-label="Close"
+            >
               <X className="h-4 w-4 text-muted-foreground" />
             </button>
           </div>
-          <div className="relative mt-3">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              autoFocus
-              placeholder="Search contacts…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
+
+          {/* Stats grid */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                <Users className="h-3 w-3" /> Contacts
+              </div>
+              <p className="text-lg font-bold font-heading text-foreground mt-0.5">{contacts.length}</p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                <DollarSign className="h-3 w-3" /> Pipeline
+              </div>
+              <p className="text-lg font-bold font-heading text-foreground mt-0.5 truncate">
+                {fmt$(totalDealValue) ?? "—"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                <TrendingUp className="h-3 w-3" /> Avg deal
+              </div>
+              <p className="text-lg font-bold font-heading text-foreground mt-0.5 truncate">
+                {withDealValue > 0 ? fmt$(avgDealValue) : "—"}
+              </p>
+            </div>
+          </div>
+
+          {/* Search + sort */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                autoFocus
+                placeholder="Search by name, email, or company…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 h-9 text-sm"
+              />
+            </div>
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+              <SelectTrigger className="h-9 w-[130px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="newest" className="text-xs">Newest first</SelectItem>
+                <SelectItem value="oldest" className="text-xs">Oldest first</SelectItem>
+                <SelectItem value="name" className="text-xs">Name A–Z</SelectItem>
+                <SelectItem value="deal_high" className="text-xs">Deal $ high</SelectItem>
+                <SelectItem value="deal_low" className="text-xs">Deal $ low</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </SheetHeader>
 
+        {/* Body */}
         <div
-          className={`flex-1 overflow-hidden transition-colors ${
-            dragOver ? "bg-primary/5" : ""
-          }`}
+          className={`flex-1 overflow-hidden transition-colors ${dragOver ? "bg-primary/5" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }}
           onDrop={() => { setDragOver(false); stage && onDrop(stage.key); }}
         >
           <ScrollArea className="h-full">
-            <div className="p-4 space-y-2">
+            <div className="p-5 space-y-2.5">
               {filtered.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <Users className="h-8 w-8 mb-2 opacity-30" />
+                <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                  <div className="h-12 w-12 rounded-full bg-muted/60 flex items-center justify-center mb-3">
+                    <Users className="h-5 w-5 opacity-50" />
+                  </div>
                   <p className="text-sm font-medium">
-                    {search ? `No contacts match “${search}”` : "No contacts in this stage"}
+                    {search ? `No contacts match "${search}"` : "No contacts in this stage"}
                   </p>
+                  {!search && hasMore && (
+                    <p className="text-xs text-muted-foreground/70 mt-1">
+                      Load more contacts below to keep looking.
+                    </p>
+                  )}
                 </div>
               ) : (
                 filtered.map((c) => (
@@ -313,24 +421,57 @@ function StageSheet({
                     key={c.id}
                     draggable
                     onDragStart={() => onDragStart(c.id)}
-                    className={`flex items-center gap-3 rounded-xl border px-3 py-3 bg-card cursor-grab active:cursor-grabbing hover:shadow-sm transition-all ${
-                      draggingId === c.id ? "opacity-50 scale-95 border-primary" : "border-border"
+                    onClick={() => onNavigate(c.id)}
+                    className={`group relative rounded-xl border bg-card px-4 py-3 cursor-grab active:cursor-grabbing hover:shadow-md hover:border-primary/30 transition-all ${
+                      draggingId === c.id ? "opacity-50 scale-95 border-primary ring-2 ring-primary/20" : "border-border"
                     }`}
                   >
-                    <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                      {initials(c.first_name, c.last_name)}
+                    <div className="flex items-start gap-3">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                        {initials(c.first_name, c.last_name)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">
+                            {c.first_name} {c.last_name}
+                          </p>
+                          {c.deal_value != null && c.deal_value > 0 && (
+                            <span className="text-xs font-bold text-emerald-600 shrink-0">
+                              {fmt$(c.deal_value)}
+                            </span>
+                          )}
+                        </div>
+                        {c.email && (
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">{c.email}</p>
+                        )}
+                        <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
+                          {c.company && (
+                            <span className="flex items-center gap-1 truncate min-w-0">
+                              <Building2 className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{c.company}</span>
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1 shrink-0">
+                            <Calendar className="h-3 w-3" />
+                            {relDate(c.created_at)}
+                          </span>
+                          {c.lead_source && (
+                            <Badge variant="outline" className="text-[9px] py-0 px-1.5 capitalize">
+                              {c.lead_source}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{c.first_name} {c.last_name}</p>
-                      {c.email && <p className="text-xs text-muted-foreground truncate">{c.email}</p>}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <Select
-                        value=""
-                        onValueChange={(toStage) => onTransfer(c.id, toStage)}
-                      >
-                        <SelectTrigger className="h-7 w-7 p-0 border-muted flex items-center justify-center" title="Transfer to stage">
+                    {/* Action row */}
+                    <div
+                      className="flex items-center justify-end gap-1.5 mt-3 pt-2.5 border-t border-border/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Select value="" onValueChange={(toStage) => onTransfer(c.id, toStage)}>
+                        <SelectTrigger className="h-7 text-[11px] w-auto px-2 gap-1.5 border-muted">
                           <ArrowRightLeft className="h-3 w-3 text-muted-foreground" />
+                          <span>Move</span>
                         </SelectTrigger>
                         <SelectContent align="end">
                           <p className="px-2 py-1 text-[10px] text-muted-foreground font-medium">Transfer to stage</p>
@@ -342,15 +483,52 @@ function StageSheet({
                           ))}
                         </SelectContent>
                       </Select>
-                      <button
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] px-2.5"
                         onClick={() => onNavigate(c.id)}
-                        className="text-[10px] text-primary underline-offset-2 hover:underline px-1"
                       >
-                        View
-                      </button>
+                        View profile
+                        <ArrowRight className="h-3 w-3 ml-1" />
+                      </Button>
                     </div>
                   </div>
                 ))
+              )}
+
+              {/* Prominent in-sheet Load more — surfaces when the user might be
+                  missing contacts that haven't been fetched yet. */}
+              {hasMore && (
+                <div className="pt-3">
+                  <Button
+                    size="lg"
+                    variant="default"
+                    className="w-full h-12 text-sm font-semibold gap-2 shadow-sm"
+                    onClick={onLoadMore}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading more contacts…
+                      </>
+                    ) : (
+                      <>
+                        <ChevronsDown className="h-4 w-4" />
+                        Load more contacts
+                        {totalContactCount > 0 && (
+                          <span className="text-xs font-normal opacity-80">
+                            ({loadedCount.toLocaleString()} of {totalContactCount.toLocaleString()})
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground text-center mt-2">
+                    More contacts may belong to this stage — load the rest to see them.
+                  </p>
+                </div>
               )}
             </div>
           </ScrollArea>
@@ -375,19 +553,65 @@ const Index = () => {
   const [addContactStage, setAddContactStage] = useState<string | null>(null);
   const [expandedStage, setExpandedStage] = useState<typeof PIPELINE_STAGES[number] | null>(null);
 
-  const { data: contacts = [], isLoading: contactsLoading } = useQuery({
-    queryKey: QK.patients,
+  // Paginated loading — Supabase PostgREST silently caps un-ranged queries at
+  // ~1000 rows, which was hiding contacts past that threshold from the
+  // pipeline. Fetch in 500-row batches and accumulate.
+  const PIPELINE_PAGE_SIZE = 500;
+  const [pipelinePage, setPipelinePage] = useState(0);
+  const [pipelineAllLoaded, setPipelineAllLoaded] = useState(false);
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
+
+  const { data: pageData, isLoading: pageLoading, isFetching: pageFetching } = useQuery({
+    queryKey: [...QK.patients, "pipeline", pipelinePage],
     queryFn: async () => {
+      const from = pipelinePage * PIPELINE_PAGE_SIZE;
+      const to = from + PIPELINE_PAGE_SIZE - 1;
       const { data, error } = await supabase
         .from("patients")
-        .select("id, first_name, last_name, email, status, pipeline_stage, created_at")
-        .order("created_at", { ascending: false });
+        .select(
+          "id, first_name, last_name, email, status, pipeline_stage, created_at, company, deal_value, lead_source, last_contacted_at",
+        )
+        .order("created_at", { ascending: false })
+        .range(from, to);
       if (error) throw error;
       return ((data ?? []) as unknown) as ContactRow[];
     },
     refetchOnMount: true,
     staleTime: 0,
   });
+
+  useEffect(() => {
+    if (!pageData) return;
+    if (pageData.length < PIPELINE_PAGE_SIZE) setPipelineAllLoaded(true);
+    setContacts((prev) => {
+      if (pipelinePage === 0) return pageData;
+      const seen = new Set(prev.map((p) => p.id));
+      return [...prev, ...pageData.filter((p) => !seen.has(p.id))];
+    });
+  }, [pageData, pipelinePage]);
+
+  // Show the page-0 skeleton only on the first load, never on subsequent
+  // "Load more" fetches (otherwise the whole board flickers each batch).
+  const contactsLoading = pageLoading && contacts.length === 0;
+  const loadingMore = pageFetching && contacts.length > 0;
+
+  // Total count for the "Loaded X of Y" indicator.
+  const { data: totalContactCount = 0 } = useQuery({
+    queryKey: [...QK.patients, "pipeline-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("patients")
+        .select("id", { count: "exact", head: true });
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 60_000,
+  });
+
+  const loadMorePipeline = () => {
+    if (pipelineAllLoaded || pageFetching) return;
+    setPipelinePage((p) => p + 1);
+  };
 
   const { data: campaigns = [] } = useQuery({
     queryKey: QK.campaigns,
@@ -508,7 +732,9 @@ const Index = () => {
         <div>
           <h1 className="font-heading text-2xl font-bold text-foreground">Sales Pipeline</h1>
           <p className="text-sm text-muted-foreground">
-            {contacts.length} contacts
+            {pipelineAllLoaded || totalContactCount === 0
+              ? `${contacts.length.toLocaleString()} contact${contacts.length === 1 ? "" : "s"}`
+              : `Showing ${contacts.length.toLocaleString()} of ${totalContactCount.toLocaleString()} contacts`}
           </p>
         </div>
         <div className="flex gap-2">
@@ -605,6 +831,68 @@ const Index = () => {
           <p className="text-xs text-muted-foreground mt-2 text-center hidden sm:block opacity-50">
             Drag cards between columns · Scroll to see all stages
           </p>
+
+          {/* Prominent Load more — only renders when more contacts remain on the
+              server. With 5000 contacts the page-1 fetch returns 500, and the
+              user clicks through this button to surface the rest into every
+              column. */}
+          {!pipelineAllLoaded && contacts.length > 0 && (
+            <div className="mt-6">
+              <button
+                onClick={loadMorePipeline}
+                disabled={loadingMore}
+                className="group w-full rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary/5 via-primary/[0.02] to-transparent hover:from-primary/10 hover:border-primary/50 transition-all px-6 py-5 text-left disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                      {loadingMore ? (
+                        <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                      ) : (
+                        <ChevronsDown className="h-5 w-5 text-primary" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-foreground">
+                        {loadingMore ? "Loading more contacts…" : "Load more contacts"}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {totalContactCount > 0 ? (
+                          <>
+                            Showing <strong className="text-foreground">{contacts.length.toLocaleString()}</strong> of{" "}
+                            <strong className="text-foreground">{totalContactCount.toLocaleString()}</strong> total contacts. Click to load the next {Math.min(PIPELINE_PAGE_SIZE, totalContactCount - contacts.length).toLocaleString()}.
+                          </>
+                        ) : (
+                          `Click to load the next ${PIPELINE_PAGE_SIZE} contacts.`
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="hidden sm:flex shrink-0 items-center gap-2 text-xs font-semibold text-primary">
+                    <span>Load batch</span>
+                    <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                {totalContactCount > 0 && (
+                  <div className="mt-4 h-1.5 rounded-full bg-primary/10 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${Math.min(100, (contacts.length / totalContactCount) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </button>
+            </div>
+          )}
+
+          {pipelineAllLoaded && contacts.length > PIPELINE_PAGE_SIZE && (
+            <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              All {contacts.length.toLocaleString()} contacts loaded
+            </div>
+          )}
         </TabsContent>
 
         {/* ── Summary ── */}
@@ -744,6 +1032,11 @@ const Index = () => {
         onDrop={handleDrop}
         onTransfer={(id, toStage) => { stageMutation.mutate({ id, stage: toStage }); toast.success(`Moved to ${PIPELINE_STAGES.find(s => s.key === toStage)?.label ?? toStage}`); }}
         draggingId={draggingId}
+        onLoadMore={loadMorePipeline}
+        hasMore={!pipelineAllLoaded}
+        loadingMore={loadingMore}
+        totalContactCount={totalContactCount}
+        loadedCount={contacts.length}
       />
 
       {/* Contact Picker Dialog */}
