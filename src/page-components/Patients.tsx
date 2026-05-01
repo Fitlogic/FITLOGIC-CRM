@@ -10,6 +10,7 @@ import {
   Users, Plus, Search, MoreHorizontal, Mail, Building2,
   Eye, Pencil, Trash2, ChevronLeft, ArrowUpDown, Tag, StickyNote,
   TrendingUp, Send, X, Filter, Upload, Download, Clock, FlaskConical, MapPin,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,10 +32,15 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious,
+} from "@/components/ui/pagination";
 import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
 import { PatientForm, type PatientFormData } from "@/components/PatientForm";
 import { PatientTimeline } from "@/components/PatientTimeline";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
+import { RichEmailEditor } from "@/components/RichEmailEditor";
 
 type Patient = {
   id: string;
@@ -204,6 +210,29 @@ function CollapsibleBody({ text, bg }: { text: string; bg: string }) {
   );
 }
 
+function FitLogicAvatar({ size = 28 }: { size?: number }) {
+  return (
+    <div
+      className="rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0 shadow-sm"
+      style={{ width: size, height: size }}
+    >
+      <span className="text-white font-bold" style={{ fontSize: size * 0.4 }}>FL</span>
+    </div>
+  );
+}
+
+function ContactAvatar({ name, size = 28 }: { name: string; size?: number }) {
+  const initial = (name?.[0] ?? "?").toUpperCase();
+  return (
+    <div
+      className="rounded-full bg-muted flex items-center justify-center shrink-0 text-muted-foreground font-bold shadow-sm"
+      style={{ width: size, height: size, fontSize: size * 0.4 }}
+    >
+      {initial}
+    </div>
+  );
+}
+
 function MailThread({ inq, contactName }: { inq: any; contactName: string }) {
   return (
     <Card className="shadow-card overflow-hidden">
@@ -219,17 +248,15 @@ function MailThread({ inq, contactName }: { inq: any; contactName: string }) {
         {inq.category && (
           <Badge variant="outline" className="text-[9px] shrink-0 capitalize">{inq.category.replace(/_/g, " ")}</Badge>
         )}
-        <Badge className={`text-[9px] border-0 shrink-0 ${inq.status === "resolved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+        <Badge className={`text-[9px] border-0 shrink-0 ${inq.status === "resolved" ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
           {inq.status}
         </Badge>
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Inbound bubble */}
+        {/* Inbound bubble - from contact */}
         <div className="flex gap-3 items-start">
-          <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center shrink-0 text-[11px] font-bold text-muted-foreground mt-0.5">
-            {(inq.patient_name?.[0] ?? "?").toUpperCase()}
-          </div>
+          <ContactAvatar name={inq.patient_name} size={28} />
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2 mb-1.5">
               <span className="text-[12px] font-semibold">{inq.patient_name}</span>
@@ -239,15 +266,13 @@ function MailThread({ inq, contactName }: { inq: any; contactName: string }) {
           </div>
         </div>
 
-        {/* Reply bubble */}
+        {/* Reply bubble - from FitLogic */}
         {inq.response_text && (
           <div className="flex gap-3 items-start pl-2 border-l-2 border-primary/25">
-            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-              <Mail className="h-3.5 w-3.5 text-primary" />
-            </div>
+            <FitLogicAvatar size={28} />
             <div className="flex-1 min-w-0">
               <div className="flex items-baseline gap-2 mb-1.5">
-                <span className="text-[12px] font-semibold text-primary">You</span>
+                <span className="text-[12px] font-semibold text-primary">FitLogic</span>
                 {inq.resolved_at && (
                   <span className="text-[10px] text-muted-foreground">{(() => {
                     const diff = Date.now() - new Date(inq.resolved_at).getTime();
@@ -297,6 +322,14 @@ export default function Patients() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
+  // Compose email dialog state
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composePatient, setComposePatient] = useState<Patient | null>(null);
+  const [composeSubject, setComposeSubject] = useState("");
+  const [composeHtml, setComposeHtml] = useState("");
+  const [composeText, setComposeText] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+
   // Persist filters to sessionStorage
   useEffect(() => {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ search, statusFilter, stageFilter, sourceFilter, sortBy, contactFilter, stateFilter }));
@@ -308,9 +341,18 @@ export default function Patients() {
     setSearch(""); setStatusFilter("all"); setStageFilter("all"); setSourceFilter("all"); setSortBy("newest"); setContactFilter("all"); setStateFilter("all");
   };
 
-  const PAGE_SIZE = 500;
+  const PAGE_SIZE = 500; // API fetch size (background loading)
   const [page, setPage] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
+
+  // Pagination for filtered display
+  const [displayPage, setDisplayPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  // Reset display page when filters change
+  useEffect(() => {
+    setDisplayPage(1);
+  }, [search, statusFilter, stageFilter, sourceFilter, sortBy, contactFilter, stateFilter]);
 
   const { data: patients = [], isLoading } = useQuery({
     queryKey: [...QK.patients, page],
@@ -606,6 +648,13 @@ export default function Patients() {
     return result;
   }, [allPatients, statusFilter, stageFilter, sourceFilter, search, sortBy, contactFilter, stateFilter]);
 
+  // Paginate filtered results for display
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginatedResults = useMemo(() => {
+    const start = (displayPage - 1) * itemsPerPage;
+    return filtered.slice(start, start + itemsPerPage);
+  }, [filtered, displayPage, itemsPerPage]);
+
   // Distinct state values present in the loaded contacts — fuels the
   // state-filter dropdown so Megan can scope a campaign to (e.g.) Texas.
   const stateOptions = useMemo(() => {
@@ -618,7 +667,7 @@ export default function Patients() {
   }, [allPatients]);
 
   // ─── DETAIL VIEW ───
-  if (viewing) {
+  const detailView = viewing ? (() => {
     const p = viewing;
     return (
       <div className="space-y-6">
@@ -666,8 +715,16 @@ export default function Patients() {
           </div>
           <div className="flex gap-2">
             {p.email && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={`mailto:${p.email}`}><Mail className="h-3.5 w-3.5 mr-1" /> Email</a>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setComposePatient(p);
+                  setComposeSubject(`Hello ${p.first_name}`);
+                  setComposeOpen(true);
+                }}
+              >
+                <Mail className="h-3.5 w-3.5 mr-1" /> Email
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => { setEditing(p); setFormOpen(true); }}>
@@ -927,31 +984,37 @@ export default function Patients() {
                       {Object.entries(grouped).map(([campaignId, logs]) => {
                         const campaignName = (logs[0] as any)?.campaigns?.name || "Unknown Campaign";
                         return (
-                          <Card key={campaignId} className="shadow-card">
-                            <CardHeader className="pb-2 pt-4">
+                          <Card key={campaignId} className="shadow-card overflow-hidden">
+                            <CardHeader className="pb-2 pt-4 border-b border-border/50 bg-muted/30">
                               <CardTitle className="text-sm font-medium flex items-center gap-2">
                                 <Mail className="h-4 w-4 text-primary shrink-0" />
                                 <span className="truncate">{campaignName}</span>
                                 <Badge variant="outline" className="text-[9px] ml-auto shrink-0">{logs.length} email{logs.length !== 1 ? 's' : ''}</Badge>
                               </CardTitle>
                             </CardHeader>
-                            <CardContent className="pt-0 divide-y divide-border/50">
+                            <CardContent className="p-4 space-y-4">
                               {logs.map((log: any) => (
-                                <div key={log.id} className="flex items-center justify-between py-2.5 gap-3">
-                                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                    <Badge variant="outline" className="text-[9px] font-mono shrink-0">Step {log.step_number ?? 1}</Badge>
-                                    <Badge className={`text-[9px] border-0 shrink-0 ${
-                                      log.status === 'sent' ? 'bg-primary/10 text-primary' :
-                                      log.status === 'failed' ? 'bg-destructive/10 text-destructive' :
-                                      'bg-muted text-muted-foreground'
-                                    }`}>{log.status}</Badge>
-                                    {log.opened_at && <Badge variant="secondary" className="text-[9px] bg-emerald-50 text-emerald-700 shrink-0">Opened</Badge>}
-                                    {log.clicked_at && <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-700 shrink-0">Clicked</Badge>}
-                                    {log.error_message && <span className="text-[10px] text-destructive truncate max-w-[120px]">{log.error_message}</span>}
+                                <div key={log.id} className="flex gap-3 items-start">
+                                  <FitLogicAvatar size={28} />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-baseline gap-2 mb-1.5 flex-wrap">
+                                      <span className="text-[12px] font-semibold text-primary">FitLogic</span>
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {log.sent_at ? relativeDate(log.sent_at) : '—'}
+                                      </span>
+                                      <Badge variant="outline" className="text-[9px] font-mono shrink-0">Step {log.step_number ?? 1}</Badge>
+                                      <Badge className={`text-[9px] border-0 shrink-0 ${
+                                        log.status === 'sent' ? 'bg-primary/10 text-primary' :
+                                        log.status === 'failed' ? 'bg-destructive/10 text-destructive' :
+                                        'bg-muted text-muted-foreground'
+                                      }`}>{log.status}</Badge>
+                                      {log.opened_at && <Badge variant="secondary" className="text-[9px] bg-emerald-50 text-emerald-700 shrink-0">Opened</Badge>}
+                                      {log.clicked_at && <Badge variant="secondary" className="text-[9px] bg-blue-50 text-blue-700 shrink-0">Clicked</Badge>}
+                                    </div>
+                                    {log.error_message && (
+                                      <span className="text-[10px] text-destructive block truncate">{log.error_message}</span>
+                                    )}
                                   </div>
-                                  <span className="text-[10px] text-muted-foreground shrink-0">
-                                    {log.sent_at ? relativeDate(log.sent_at) : '—'}
-                                  </span>
                                 </div>
                               ))}
                             </CardContent>
@@ -1017,10 +1080,10 @@ export default function Patients() {
         </Dialog>
       </div>
     );
-  }
+  })() : null;
 
   // ─── LIST VIEW ───
-  return (
+  const listView = !viewing ? (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1266,7 +1329,7 @@ export default function Patients() {
                   <TableHead className="w-10">
                     <input
                       type="checkbox"
-                      checked={selected.size === filtered.length && filtered.length > 0}
+                      checked={paginatedResults.length > 0 && paginatedResults.every(p => selected.has(p.id))}
                       onChange={toggleSelectAll}
                       className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
                     />
@@ -1281,8 +1344,8 @@ export default function Patients() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((p) => (
-                  <TableRow key={p.id} className={`cursor-pointer group ${selected.has(p.id) ? "bg-primary/5" : ""}`} onClick={() => setViewing(p)}>
+                {paginatedResults.map((p) => (
+                  <TableRow key={p.id} className={`cursor-pointer group ${selected.has(p.id) ? "bg-primary/5" : ""}`} onClick={() => { setViewing(p); router.push(`/contacts?id=${p.id}`); }}>
                     <TableCell className="p-0" onClick={(e) => { e.stopPropagation(); toggleSelect(p.id); }}>
                       <label className="flex items-center justify-center w-full h-full min-h-[44px] cursor-pointer px-3">
                         <input
@@ -1337,7 +1400,7 @@ export default function Patients() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setViewing(p)}>
+                          <DropdownMenuItem onClick={() => { setViewing(p); router.push(`/contacts?id=${p.id}`); }}>
                             <Eye className="h-3.5 w-3.5 mr-2" /> View
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setEditing(p); setFormOpen(true); }}>
@@ -1358,22 +1421,95 @@ export default function Patients() {
         </CardContent>
       </Card>
 
-      {/* Summary + Load more */}
-      <div className="flex flex-col items-center gap-2">
+      {/* Pagination + Summary */}
+      <div className="flex flex-col items-center gap-4">
         {filtered.length > 0 && (
-          <p className="text-xs text-muted-foreground text-center">
-            Showing {filtered.length} of {allPatients.length}{!allLoaded ? "+" : ""} contacts
-          </p>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span>
+              Showing {((displayPage - 1) * itemsPerPage) + 1}-{Math.min(displayPage * itemsPerPage, filtered.length)} of {filtered.length} filtered
+              {allPatients.length < filtered.length + (allLoaded ? 0 : 500) && ` (${allPatients.length} loaded)`}
+            </span>
+            {!allLoaded && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs px-2"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={isLoading}
+              >
+                {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Load more data"}
+              </Button>
+            )}
+          </div>
         )}
-        {!allLoaded && !isLoading && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Load more contacts
-          </Button>
+
+        {totalPages > 1 && (
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => setDisplayPage(p => Math.max(1, p - 1))}
+                  className={displayPage <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                // Show pages around current page
+                let pageNum;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (displayPage <= 3) {
+                  pageNum = i + 1;
+                } else if (displayPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = displayPage - 2 + i;
+                }
+
+                return (
+                  <PaginationItem key={pageNum}>
+                    <PaginationLink
+                      isActive={displayPage === pageNum}
+                      onClick={() => setDisplayPage(pageNum)}
+                      className="cursor-pointer"
+                    >
+                      {pageNum}
+                    </PaginationLink>
+                  </PaginationItem>
+                );
+              })}
+
+              {totalPages > 5 && displayPage < totalPages - 2 && (
+                <PaginationItem>
+                  <PaginationEllipsis />
+                </PaginationItem>
+              )}
+
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => setDisplayPage(p => Math.min(totalPages, p + 1))}
+                  className={displayPage >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
         )}
+
+        {/* Items per page selector */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Items per page:</span>
+          <Select value={String(itemsPerPage)} onValueChange={(v) => { setItemsPerPage(Number(v)); setDisplayPage(1); }}>
+            <SelectTrigger className="h-7 w-[70px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="25">25</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Add/Edit Dialog */}
@@ -1477,6 +1613,126 @@ export default function Patients() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
+  ) : null;
+
+  // ─── SHARED COMPOSE DIALOG ───
+  const composeDialog = (
+    <Dialog open={composeOpen} onOpenChange={setComposeOpen}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Compose Email</DialogTitle>
+          <DialogDescription>
+            Sending to {composePatient?.first_name} {composePatient?.last_name} &lt;{composePatient?.email}&gt;
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="subject">Subject</Label>
+            <input
+              id="subject"
+              value={composeSubject}
+              onChange={(e) => setComposeSubject(e.target.value)}
+              placeholder="Email subject..."
+              className="w-full px-3 py-2 border rounded-md text-sm"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Message</Label>
+            <RichEmailEditor
+              value={composeHtml}
+              onChange={(html) => {
+                setComposeHtml(html);
+                // Strip HTML tags safely (regex with [^>]+ can stack overflow on long base64 data)
+                const text = html
+                  .replace(/<br\s*\/?>/gi, "\n")
+                  .replace(/<\/p>/gi, "\n")
+                  .replace(/<[^>]*>/g, " ")
+                  .replace(/\s+/g, " ")
+                  .trim();
+                setComposeText(text);
+              }}
+              placeholder="Write your message..."
+              minHeight={250}
+              subject={composeSubject}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setComposeOpen(false)} disabled={sendingEmail}>
+            Cancel
+          </Button>
+          <Button
+            onClick={async () => {
+              if (!composePatient?.email || !composeText.trim()) return;
+              setSendingEmail(true);
+              try {
+                const res = await fetch("/api/send-gmail", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    to: composePatient.email,
+                    toName: `${composePatient.first_name} ${composePatient.last_name}`,
+                    subject: composeSubject,
+                    html: composeHtml,
+                    variables: {
+                      first_name: composePatient.first_name,
+                      last_name: composePatient.last_name,
+                      email: composePatient.email,
+                      phone: composePatient.phone,
+                      company: composePatient.company,
+                      deal_value: composePatient.deal_value,
+                      lead_source: composePatient.lead_source,
+                      pipeline_stage: composePatient.pipeline_stage,
+                      status: composePatient.status,
+                      city: composePatient.city,
+                      state: composePatient.state,
+                      address: composePatient.address,
+                      zip_code: composePatient.zip_code,
+                      notes: composePatient.notes,
+                    },
+                  }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data?.error ?? "Send failed");
+                toast({
+                  title: "Email sent",
+                  description: `Message sent to ${composePatient.first_name} ${composePatient.last_name}`,
+                });
+                setComposeOpen(false);
+                setComposeHtml("");
+                setComposeText("");
+                setComposeSubject("");
+              } catch (e: unknown) {
+                toast({
+                  title: "Failed to send",
+                  description: e instanceof Error ? e.message : "Unknown error",
+                  variant: "destructive",
+                });
+              } finally {
+                setSendingEmail(false);
+              }
+            }}
+            disabled={!composeText.trim() || sendingEmail}
+            className="gap-1.5"
+          >
+            {sendingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {sendingEmail ? "Sending…" : "Send Email"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  return (
+    <>
+      {detailView}
+      {listView}
+      {composeDialog}
+    </>
   );
 }

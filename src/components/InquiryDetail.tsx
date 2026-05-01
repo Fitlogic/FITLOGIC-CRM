@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { Mail, Globe, Phone, PenLine, Clock, User, Send, AlertTriangle, CheckCircle, Bot, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -12,6 +11,7 @@ import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { MailFormatter } from "@/components/MailFormatter";
+import { RichEmailEditor } from "@/components/RichEmailEditor";
 import type { InquiryRow } from "@/components/InquiryList";
 import type { InquiryCategory, InquiryStatus } from "@/lib/types";
 
@@ -36,6 +36,7 @@ interface Props {
 
 export function InquiryDetail({ inquiry, onUpdate }: Props) {
   const [reply, setReply] = useState("");
+  const [replyHtml, setReplyHtml] = useState("");
   const [sending, setSending] = useState(false);
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [escalationStaffId, setEscalationStaffId] = useState<string | null>(null);
@@ -138,7 +139,7 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
       const res = await fetch("/api/send-inquiry-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inquiry_id: inquiry.id, reply_text: reply }),
+        body: JSON.stringify({ inquiry_id: inquiry.id, reply_text: reply, html_content: replyHtml }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Send failed");
@@ -150,6 +151,7 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
       onUpdate(inquiry.id, updates);
       toast.success("Reply sent & inquiry resolved");
       setReply("");
+      setReplyHtml("");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to send reply");
     } finally {
@@ -253,14 +255,20 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
               </Button>
             </div>
 
-            <div>
-              <Textarea
+            <div className="space-y-3">
+              <RichEmailEditor
+                value={replyHtml}
+                onChange={(html) => {
+                  setReplyHtml(html);
+                  // Extract plain text for response_text storage
+                  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                  setReply(text);
+                }}
                 placeholder="Write a reply..."
-                value={reply}
-                onChange={(e) => setReply(e.target.value)}
-                className="min-h-[100px] bg-background"
+                minHeight={150}
+                subject={`Re: ${inquiry.patient_name}`}
               />
-              <div className="flex justify-end mt-2">
+              <div className="flex justify-end">
                 <Button
                   onClick={handleSendReply}
                   disabled={!reply.trim() || sending}

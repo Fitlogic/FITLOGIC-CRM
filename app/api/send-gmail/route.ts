@@ -20,6 +20,19 @@ interface SendEmailRequest {
   html: string;
   text?: string;
   attachments?: EmailAttachment[];
+  variables?: Record<string, string | number | null | undefined>;
+}
+
+// Replace template variables like {{first_name}} with actual values
+function replaceVariables(
+  template: string,
+  variables?: Record<string, string | number | null | undefined>
+): string {
+  if (!variables) return template;
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    const value = variables[key];
+    return value != null ? String(value) : match;
+  });
 }
 
 async function getValidAccessToken(token: GmailToken): Promise<string | null> {
@@ -57,10 +70,10 @@ function buildMimeMessage(
 ): string {
   const boundary = `----FormBoundary${Math.random().toString(36).substring(2)}`;
   const now = new Date();
-  
+
   // Encode subject for non-ASCII characters
   const encodedSubject = `=?UTF-8?B?${Buffer.from(subject).toString("base64")}?=`;
-  
+
   let mimeMessage = `From: ${fromName} <${from}>
 To: ${toName} <${to}>
 Subject: ${encodedSubject}
@@ -75,7 +88,7 @@ MIME-Version: 1.0
 This is a multi-part message in MIME format.
 --${boundary}
 `;
-    
+
     // Add alternative text/html body
     if (textBody) {
       mimeMessage += `Content-Type: multipart/alternative; boundary="${boundary}_alt"
@@ -169,7 +182,11 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json() as SendEmailRequest;
-    const { to, toName, subject, html, attachments } = body;
+    const { to, toName, subject, html, attachments, variables } = body;
+
+    // Apply variable replacement to subject and html
+    const processedSubject = replaceVariables(subject, variables);
+    const processedHtml = replaceVariables(html, variables);
 
     if (!to || !subject) {
       return NextResponse.json(
@@ -204,15 +221,15 @@ export async function POST(req: Request) {
     const fromAddress = settings?.email_from_address || "noreply@example.com";
     const fromName = settings?.email_from_name || "FitLogic";
 
-    // Build the MIME message
-    const textBody = htmlToText(html);
+    // Build the MIME message (images are hosted URLs from Supabase)
+    const textBody = htmlToText(processedHtml);
     const mimeMessage = buildMimeMessage(
       fromAddress,
       fromName,
       to,
       toName || to.split("@")[0],
-      subject,
-      html,
+      processedSubject,
+      processedHtml,
       textBody,
       attachments
     );
@@ -254,7 +271,7 @@ export async function POST(req: Request) {
       source_id: result.id,
       patient_email: to,
       patient_name: toName || to,
-      raw_content: `Subject: ${subject}\n\n${html}`,
+      raw_content: `Subject: ${processedSubject}\n\n${processedHtml}`,
       status: "resolved",
       category: "Sent_Email",
     } as any);

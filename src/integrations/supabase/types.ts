@@ -625,17 +625,22 @@ export type Database = {
         Insert: {
           address?: string | null
           city?: string | null
+          company?: string | null
           created_at?: string
           date_of_birth?: string | null
+          deal_value?: number | null
           email?: string | null
           first_name: string
           gender?: string | null
           id?: string
           insurance_id?: string | null
           insurance_provider?: string | null
+          is_test_contact?: boolean
           last_name: string
+          lead_source?: string | null
           notes?: string | null
           phone?: string | null
+          pipeline_stage?: string | null
           state?: string | null
           status?: string
           tags?: string[] | null
@@ -645,17 +650,22 @@ export type Database = {
         Update: {
           address?: string | null
           city?: string | null
+          company?: string | null
           created_at?: string
           date_of_birth?: string | null
+          deal_value?: number | null
           email?: string | null
           first_name?: string
           gender?: string | null
           id?: string
           insurance_id?: string | null
           insurance_provider?: string | null
+          is_test_contact?: boolean
           last_name?: string
+          lead_source?: string | null
           notes?: string | null
           phone?: string | null
+          pipeline_stage?: string | null
           state?: string | null
           status?: string
           tags?: string[] | null

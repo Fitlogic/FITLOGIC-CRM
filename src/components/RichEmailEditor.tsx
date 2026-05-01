@@ -2,6 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import DOMPurify from "dompurify";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import {
   Bold, Italic, Link, List, ListOrdered, Eye, Code, Type, Smartphone, Monitor,
   User, Building, Mail, Calendar, Variable, Search, Plus, X, Palette,
@@ -276,24 +278,28 @@ export function RichEmailEditor({
     }
   };
 
-  // Insert CTA button
+  // Insert CTA button - bulletproof email button for Gmail/Outlook compatibility
   const insertButton = () => {
+    const borderStyle = buttonConfig.bgColor === 'transparent'
+      ? `border: 2px solid ${buttonConfig.textColor};`
+      : 'border: none;';
+    // Bulletproof button: uses both bgcolor (Outlook) and background-color (modern clients)
     const buttonHtml = `
-      <div style="text-align: center; margin: 20px 0;">
-        <a href="${buttonConfig.url || '#'})" 
-           style="display: inline-block; 
-                  background-color: ${buttonConfig.bgColor}; 
-                  color: ${buttonConfig.textColor}; 
-                  padding: ${buttonConfig.padding}; 
-                  border-radius: ${buttonConfig.borderRadius}; 
-                  text-decoration: none; 
-                  font-weight: 600;
-                  font-size: 14px;
-                  border: ${buttonConfig.bgColor === 'transparent' ? `2px solid ${buttonConfig.textColor}` : 'none'};">
-          ${buttonConfig.text}
-        </a>
-      </div>
-    `;
+<table role="presentation" border="0" cellspacing="0" cellpadding="0" align="center" style="margin: 20px auto;">
+  <tr>
+    <td align="center" style="border-radius: ${buttonConfig.borderRadius}; ${borderStyle} background-color: ${buttonConfig.bgColor};" bgcolor="${buttonConfig.bgColor}">
+      <!--[if mso]>
+      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${buttonConfig.url || '#'}" style="height:40px;v-text-anchor:middle;width:200px;" arcsize="${parseInt(buttonConfig.borderRadius) * 10}%" strokecolor="${buttonConfig.bgColor === 'transparent' ? buttonConfig.textColor : buttonConfig.bgColor}" fillcolor="${buttonConfig.bgColor}">
+      <w:anchorlock/>
+      <center style="color:${buttonConfig.textColor};font-family:sans-serif;font-size:14px;font-weight:600;">${buttonConfig.text}</center>
+      </v:roundrect>
+      <![endif]-->
+      <!--[if !mso]><!-->
+      <a href="${buttonConfig.url || '#'}" style="display: inline-block; padding: ${buttonConfig.padding}; font-size: 14px; font-weight: 600; color: ${buttonConfig.textColor}; text-decoration: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; mso-hide: all;">${buttonConfig.text}</a>
+      <!--<![endif]-->
+    </td>
+  </tr>
+</table>`;
     
     if (mode === "visual") {
       insertAtCursor(buttonHtml);
@@ -310,24 +316,44 @@ export function RichEmailEditor({
     }
   };
 
-  // Handle image upload
-  const handleImageUpload = (file: File | undefined) => {
+  const { toast } = useToast();
+
+  // Handle image upload - uploads to Supabase Email bucket
+  const handleImageUpload = async (file: File | undefined) => {
     if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      setImagePreview(result);
-      setImageUrl("");
-    };
-    reader.readAsDataURL(file);
+
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Invalid file', description: 'Please select an image file', variant: 'destructive' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: 'File too large', description: 'Maximum size is 5MB', variant: 'destructive' });
+      return;
+    }
+
+    // Upload to Supabase Storage
+    const fileName = `email-${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${file.name.split('.').pop()}`;
+    const { error: uploadError } = await supabase.storage
+      .from('emails')
+      .upload(fileName, file, { contentType: file.type });
+
+    if (uploadError) {
+      toast({ title: 'Upload failed', description: uploadError.message, variant: 'destructive' });
+      return;
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage.from('emails').getPublicUrl(fileName);
+    setImagePreview(publicUrl);
+    setImageUrl(publicUrl);
   };
 
   // Insert image at cursor
   const insertImage = () => {
     if (!imagePreview) return;
-    
-    const imgHtml = `<img src="${imagePreview}" style="max-width: 100%; height: auto; border-radius: 4px;" />`;
+
+    const imgHtml = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"><tr><td align="center" style="background-color: #f3f4f6; border-radius: 4px;"><img src="${imagePreview}" width="100%" alt="Email image" style="max-width: 100%; height: auto; border-radius: 4px; display: block; font-family: sans-serif; font-size: 14px; color: #6b7280; text-align: center;" /></td></tr></table>`;
     
     if (mode === "visual") {
       insertAtCursor(imgHtml);
@@ -586,6 +612,30 @@ export function RichEmailEditor({
             {/* Undo/Redo */}
             <ToolbarButton icon={Undo} label="Undo" onClick={() => formatDoc("undo")} />
             <ToolbarButton icon={Redo} label="Redo" onClick={() => formatDoc("redo")} />
+
+            <Separator orientation="vertical" className="h-6 mx-1" />
+
+            {/* Attachment */}
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                className="hidden"
+                multiple
+                onChange={(e) => handleAttachment(e.target.files)}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 gap-1.5"
+                onMouseDown={(e) => e.preventDefault()}
+                asChild
+              >
+                <span>
+                  <Paperclip className="h-4 w-4" />
+                  <span className="text-xs">Attach</span>
+                </span>
+              </Button>
+            </label>
           </>
         )}
 

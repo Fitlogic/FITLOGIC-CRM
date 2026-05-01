@@ -16,6 +16,7 @@ interface SendResult {
   success: boolean;
   messageId?: string;
   error?: string;
+  provider?: "resend" | "gmail";
 }
 
 async function sendViaResend(apiKey: string, payload: EmailPayload): Promise<SendResult> {
@@ -38,12 +39,56 @@ async function sendViaResend(apiKey: string, payload: EmailPayload): Promise<Sen
   return { success: false, error: `Resend ${res.status}: ${await res.text()}` };
 }
 
-async function sendEmail(apiKey: string, payload: EmailPayload): Promise<SendResult> {
+// Send via Gmail API using our internal endpoint
+async function sendViaGmail(payload: EmailPayload, baseUrl: string): Promise<SendResult> {
   try {
-    return await sendViaResend(apiKey, payload);
+    const res = await fetch(`${baseUrl}/api/send-gmail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: payload.to,
+        toName: payload.toName,
+        subject: payload.subject,
+        html: payload.html,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, messageId: data.messageId };
+    }
+    return { success: false, error: `Gmail ${res.status}: ${await res.text()}` };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+async function sendEmail(
+  apiKey: string,
+  payload: EmailPayload,
+  baseUrl: string,
+  hasGmail: boolean
+): Promise<SendResult> {
+  // Try Resend first
+  const resendResult = await sendViaResend(apiKey, payload);
+  if (resendResult.success) {
+    return { ...resendResult, provider: "resend" };
+  }
+
+  // Fall back to Gmail if available
+  if (hasGmail) {
+    console.log(`Resend failed (${resendResult.error}), trying Gmail fallback...`);
+    const gmailResult = await sendViaGmail(payload, baseUrl);
+    if (gmailResult.success) {
+      return { ...gmailResult, provider: "gmail" };
+    }
+    // Return combined error if both fail
+    return {
+      success: false,
+      error: `Resend: ${resendResult.error}; Gmail: ${gmailResult.error}`,
+    };
+  }
+
+  return resendResult;
 }
 
 async function updateCampaignStats(supabase: SupabaseClient, campaignId: string) {
@@ -68,7 +113,7 @@ export async function POST(req: NextRequest) {
   try {
     const { data: settings } = await supabase
       .from("practice_settings")
-      .select("email_provider_api_key, email_from_address, email_from_name, max_sends_per_day")
+      .select("email_provider_api_key, email_from_address, email_from_name, max_sends_per_day, google_gmail_token")
       .limit(1)
       .single();
 
@@ -91,6 +136,9 @@ export async function POST(req: NextRequest) {
     const fromAddress = process.env.FROM_EMAIL ?? settings?.email_from_address ?? "";
     const fromName = settings?.email_from_name ?? "FitLogic";
     const fromHeader = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
+
+    // Check if Gmail is connected for fallback (cast through unknown as types predate this column)
+    const hasGmail = !!(settings as unknown as { google_gmail_token?: unknown })?.google_gmail_token;
 
     if (!emailApiKey || !fromAddress) {
       console.warn("Email provider not fully configured. Sends will be logged as failed.");
@@ -221,7 +269,7 @@ export async function POST(req: NextRequest) {
           .eq("status", "failed");
 
         const nextStatus = (remainingFailed ?? 0) > 0 ? "paused" : "sent";
-        const nextUpdate: Record<string, unknown> = { status: nextStatus };
+        const nextUpdate: { status: string; sent_at?: string } = { status: nextStatus };
         if (nextStatus === "sent") nextUpdate.sent_at = now.toISOString();
         await supabase.from("campaigns").update(nextUpdate).eq("id", campaign.id);
         await updateCampaignStats(supabase, campaign.id);
@@ -333,20 +381,25 @@ export async function POST(req: NextRequest) {
           return `href="${clickUrl}"`;
         });
 
-        const finalHtml = `${trackedBody}
-<img src="${trackPixel}" width="1" height="1" style="display:none" alt="" />
-<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb;text-align:center;font-size:11px;color:#9ca3af;">
-  You received this email because you opted in.<br/>
-  <a href="${unsubLink}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a>
-</div>`;
+        const finalHtml = `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+  <tr><td>${trackedBody}</td></tr>
+  <tr><td><img src="${trackPixel}" width="1" height="1" style="display:block" alt="" /></td></tr>
+  <tr>
+    <td style="padding-top:32px; border-top:1px solid #e5e7eb; text-align:center; font-size:11px; color:#9ca3af; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <p style="margin:0 0 8px;">You received this email because you opted in.</p>
+      <a href="${unsubLink}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe</a>
+    </td>
+  </tr>
+</table>`;
 
         await supabase.from("campaign_send_log").insert({ campaign_id: campaign.id, recipient_id: recipient.id, step_number: stepNumber, status: "queued", tracking_id: trackingId });
 
-        const sendResult = await sendEmail(emailApiKey, { to: recipient.email, toName: recipient.name, subject, html: finalHtml, from: fromHeader, listUnsubscribeUrl: unsubLink, trackingId });
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+        const sendResult = await sendEmail(emailApiKey, { to: recipient.email, toName: recipient.name, subject, html: finalHtml, from: fromHeader, listUnsubscribeUrl: unsubLink, trackingId }, baseUrl, hasGmail);
 
         if (sendResult.success) {
           await supabase.from("campaign_send_log").update({ status: "sent", sent_at: now.toISOString() }).eq("tracking_id", trackingId);
-          const recipientUpdate: Record<string, unknown> = { status: isSequence ? "pending" : "sent", sent_at: now.toISOString() };
+          const recipientUpdate: { status: string; sent_at: string; current_step?: number } = { status: isSequence ? "pending" : "sent", sent_at: now.toISOString() };
           if (isSequence) { recipientUpdate.current_step = stepNumber; if (stepNumber >= sequences.length) recipientUpdate.status = "completed"; }
           await supabase.from("campaign_recipients").update(recipientUpdate).eq("id", recipient.id);
           // A1.4: stamp the patient's last_contacted_at so the daily list can

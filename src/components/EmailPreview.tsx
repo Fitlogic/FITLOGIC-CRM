@@ -19,10 +19,31 @@ export function EmailPreview({ html, subject, previewText, className }: EmailPre
   const [fullscreen, setFullscreen] = useState(false);
 
   const wrappedHtml = `
-    <!DOCTYPE html>
-    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <style>body{margin:0;padding:20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a;background:#fff}img{max-width:100%;height:auto}a{color:#2563eb}p{margin:0 0 12px}</style>
-    </head><body>${html || '<p style="color:#999;text-align:center;padding:40px">No email content yet</p>'}</body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Preview</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a1a; background: #fff; }
+    table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; max-width: 100%; height: auto; border: 0; outline: none; text-decoration: none; }
+    a { color: #2563eb; text-decoration: underline; }
+    p { margin: 0 0 12px; }
+    @media only screen and (max-width: 600px) {
+      .email-container { width: 100% !important; }
+    }
+  </style>
+</head>
+<body>
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" class="email-container">
+    <tr><td>
+      ${html || '<p style="color:#999;text-align:center;padding:40px">No email content yet</p>'}
+    </td></tr>
+  </table>
+</body>
+</html>
   `;
 
   const autoResizeIframe = (iframe: HTMLIFrameElement) => {
