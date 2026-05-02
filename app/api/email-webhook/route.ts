@@ -6,32 +6,59 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // (breaks Next.js build env injection during route data collection).
 let sb: SupabaseClient;
 
+// All writes below destructure { error } and log on failure. Previously
+// these were silent — a permission-denied or constraint violation in the
+// suppression list (or any update) would just disappear, leading to repeat
+// sends to bounced addresses and stale campaign stats.
 async function suppress(email: string, reason: string, campaignId?: string) {
-  await sb.from("email_suppressions").upsert(
+  const { error } = await sb.from("email_suppressions").upsert(
     { email: email.toLowerCase(), reason, campaign_id: campaignId ?? null },
     { onConflict: "email", ignoreDuplicates: false }
   );
+  if (error) console.error("[email-webhook] suppress() failed", { email, reason, error: error.message });
 }
 
 async function markBounced(trackingId: string, bounceType: string) {
-  await sb.from("campaign_send_log").update({ status: "bounced", bounce_type: bounceType } as never).eq("tracking_id", trackingId);
+  const { error } = await sb.from("campaign_send_log")
+    .update({ status: "bounced", bounce_type: bounceType } as never)
+    .eq("tracking_id", trackingId);
+  if (error) console.error("[email-webhook] markBounced() failed", { trackingId, error: error.message });
 }
 
 async function markComplained(trackingId: string) {
-  await sb.from("campaign_send_log").update({ status: "complained", complaint_at: new Date().toISOString() } as never).eq("tracking_id", trackingId);
+  const { error } = await sb.from("campaign_send_log")
+    .update({ status: "complained", complaint_at: new Date().toISOString() } as never)
+    .eq("tracking_id", trackingId);
+  if (error) console.error("[email-webhook] markComplained() failed", { trackingId, error: error.message });
 }
 
 async function markOpened(trackingId: string) {
-  const { data } = await sb.from("campaign_send_log").select("id, opened_at").eq("tracking_id", trackingId).maybeSingle();
+  const { data, error: selErr } = await sb.from("campaign_send_log")
+    .select("id, opened_at").eq("tracking_id", trackingId).maybeSingle();
+  if (selErr) {
+    console.error("[email-webhook] markOpened SELECT failed", { trackingId, error: selErr.message });
+    return;
+  }
   if (data && !data.opened_at) {
-    await sb.from("campaign_send_log").update({ status: "opened", opened_at: new Date().toISOString() }).eq("tracking_id", trackingId);
+    const { error } = await sb.from("campaign_send_log")
+      .update({ status: "opened", opened_at: new Date().toISOString() })
+      .eq("tracking_id", trackingId);
+    if (error) console.error("[email-webhook] markOpened UPDATE failed", { trackingId, error: error.message });
   }
 }
 
 async function markClicked(trackingId: string) {
-  const { data } = await sb.from("campaign_send_log").select("id, clicked_at").eq("tracking_id", trackingId).maybeSingle();
+  const { data, error: selErr } = await sb.from("campaign_send_log")
+    .select("id, clicked_at").eq("tracking_id", trackingId).maybeSingle();
+  if (selErr) {
+    console.error("[email-webhook] markClicked SELECT failed", { trackingId, error: selErr.message });
+    return;
+  }
   if (data && !data.clicked_at) {
-    await sb.from("campaign_send_log").update({ status: "clicked", clicked_at: new Date().toISOString() }).eq("tracking_id", trackingId);
+    const { error } = await sb.from("campaign_send_log")
+      .update({ status: "clicked", clicked_at: new Date().toISOString() })
+      .eq("tracking_id", trackingId);
+    if (error) console.error("[email-webhook] markClicked UPDATE failed", { trackingId, error: error.message });
   }
 }
 

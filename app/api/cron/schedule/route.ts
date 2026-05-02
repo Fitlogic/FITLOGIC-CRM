@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
+import { applyEmailVars, buildPatientVars } from "@/lib/email-vars";
+import { tryClaimCampaignLock, releaseCampaignLock } from "@/lib/campaign-lock";
+import { signUnsubToken } from "@/lib/unsub-token";
 
 async function updateCampaignStats(supabase: SupabaseClient, campaignId: string) {
   const { data } = await supabase.from("campaign_send_log").select("status, opened_at, clicked_at").eq("campaign_id", campaignId);
@@ -110,9 +113,21 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       }
     }
 
+    // Atomic lock prevents this cron run from processing the same campaign
+    // a parallel "Send Now" click is already working on. See
+    // src/lib/campaign-lock.ts for semantics.
+    const claimed = await tryClaimCampaignLock(supabase, campaign.id);
+    if (!claimed) {
+      console.log("[cron/schedule] skipping — another worker holds the lock", { campaign: campaign.name });
+      results.push({ campaign: campaign.name, skipped: "another worker is processing" });
+      continue;
+    }
+
     const maxSends = campaign.max_sends_per_day ?? settings?.max_sends_per_day ?? 500;
-    const todayStart = new Date(now);
-    todayStart.setUTCHours(0, 0, 0, 0);
+    // Reset at Texas midnight, not UTC midnight — see comment in
+    // process-campaign-queue/route.ts for the rationale.
+    const todayStart = new Date(now.toLocaleString("en-US", { timeZone: TEXAS_TIMEZONE }));
+    todayStart.setHours(0, 0, 0, 0);
 
     const { count: sentToday } = await supabase
       .from("campaign_send_log")
@@ -122,7 +137,11 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       .gte("sent_at", todayStart.toISOString());
 
     const remaining = maxSends - (sentToday ?? 0);
-    if (remaining <= 0) { results.push({ campaign: campaign.name, skipped: "daily limit reached" }); continue; }
+    if (remaining <= 0) {
+      results.push({ campaign: campaign.name, skipped: "daily limit reached" });
+      await releaseCampaignLock(supabase, campaign.id);
+      continue;
+    }
 
     if (campaign.status === "scheduled") {
       await supabase.from("campaigns").update({ status: "sending" }).eq("id", campaign.id);
@@ -231,11 +250,18 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       .order("created_at")
       .limit(Math.min(remaining, 500));
 
-    // Test-mode gate (A1.5): build the set of patient_ids that are flagged
-    // is_test_contact = true so we can skip everyone else without one SELECT
-    // per recipient inside the loop.
-    let testEligiblePatientIds: Set<string> = new Set();
-    if (testModeOnly && pendingRecipients?.length) {
+    // Single batch fetch of all referenced patients — kills the per-recipient
+    // N+1 lookup inside the loop and unifies test-mode + variable substitution.
+    type PatientFields = {
+      id: string;
+      first_name: string | null;
+      last_name: string | null;
+      company: string | null;
+      is_test_contact?: boolean | null;
+    };
+    const patientById = new Map<string, PatientFields>();
+    const testEligiblePatientIds: Set<string> = new Set();
+    if (pendingRecipients?.length) {
       const patientIds = Array.from(
         new Set(
           pendingRecipients
@@ -244,20 +270,21 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
         ),
       );
       if (patientIds.length > 0) {
-        // Cast through unknown — auto-generated supabase types predate the
-        // is_test_contact column.
-        const { data: testRows } = await (supabase
+        const patientsRes = await (supabase
           .from("patients") as unknown as {
             select: (cols: string) => {
-              in: (col: string, ids: string[]) => {
-                eq: (col: string, val: boolean) => Promise<{ data: { id: string }[] | null }>;
-              };
+              in: (col: string, ids: string[]) => Promise<{ data: PatientFields[] | null; error: { message: string } | null }>;
             };
           })
-          .select("id")
-          .in("id", patientIds)
-          .eq("is_test_contact", true);
-        testEligiblePatientIds = new Set((testRows ?? []).map((r: { id: string }) => r.id));
+          .select("id, first_name, last_name, company, is_test_contact")
+          .in("id", patientIds);
+        if (patientsRes.error) {
+          console.error("[cron/schedule] patient batch fetch failed", { error: patientsRes.error.message });
+        }
+        for (const p of patientsRes.data ?? []) {
+          patientById.set(p.id, p);
+          if (p.is_test_contact === true) testEligiblePatientIds.add(p.id);
+        }
       }
     }
 
@@ -274,6 +301,7 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       await supabase.from("campaigns").update(nextUpdate).eq("id", campaign.id);
       await updateCampaignStats(supabase, campaign.id);
       results.push({ campaign: campaign.name, completed: true, status: nextStatus });
+      await releaseCampaignLock(supabase, campaign.id);
       continue;
     }
 
@@ -358,11 +386,33 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
         continue;
       }
 
+      // Per-recipient variable substitution. The cron path was previously
+      // missing this entirely, so recipients of the 8am daily batch received
+      // emails with literal `{first_name}` text. Patient data comes from the
+      // batched fetch (no N+1).
+      const patient = recipient.patient_id ? patientById.get(recipient.patient_id) : undefined;
+      let firstName = patient?.first_name ?? "";
+      let lastName = patient?.last_name ?? "";
+      if (!firstName && recipient.name) {
+        const parts = recipient.name.trim().split(/\s+/);
+        firstName = parts[0] || "";
+        lastName = parts.slice(1).join(" ") || "";
+      }
+      const vars = buildPatientVars({
+        firstName, lastName,
+        email: recipient.email,
+        fallbackName: recipient.name,
+        extra: { company: patient?.company ?? "" },
+      });
+      subject = applyEmailVars(subject, vars);
+      bodyHtml = applyEmailVars(bodyHtml, vars);
+
       const trackingId = crypto.randomUUID();
       const trackBase = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api`;
       const trackPixel = `${trackBase}/track-email?t=${trackingId}&a=open`;
-      const unsubLink = `${trackBase}/campaign-unsubscribe?t=${trackingId}`;
+      const unsubLink = `${trackBase}/campaign-unsubscribe?t=${trackingId}&s=${signUnsubToken(trackingId)}`;
 
+      // Sanitize after variable replacement so injected values get stripped.
       const safeBody = sanitizeEmailHtml(bodyHtml);
       const trackedBody = safeBody.replace(/href="(https?:\/\/[^"]+)"/g, (_match: string, url: string) => {
         const clickUrl = `${trackBase}/track-email?t=${trackingId}&a=click&url=${encodeURIComponent(url)}`;
@@ -422,10 +472,12 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       } catch (err) {
         console.error("Error updating sent count:", err);
       }
-      await updateCampaignStats(supabase, campaign.id);
     }
+    // Refresh stats unconditionally — failed/skipped/bounced also matter.
+    await updateCampaignStats(supabase, campaign.id);
 
     results.push({ campaign: campaign.name, sent: sentCount, failed: failedCount, skipped: skippedCount });
+    await releaseCampaignLock(supabase, campaign.id);
   }
 
   return { processed: results };

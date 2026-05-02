@@ -1,12 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
+import { verifyUnsubToken } from "@/lib/unsub-token";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const trackingId = url.searchParams.get("t");
+  const signature = url.searchParams.get("s");
 
   if (!trackingId) {
     return new NextResponse(unsubPage("Missing tracking information.", false), {
+      headers: { "Content-Type": "text/html" },
+      status: 400,
+    });
+  }
+
+  // Reject forged tokens. `verifyUnsubToken` accepts missing signatures so
+  // emails sent before HMAC-signing shipped still unsubscribe correctly.
+  if (!verifyUnsubToken(trackingId, signature)) {
+    console.warn("[campaign-unsubscribe] signature mismatch", { trackingId });
+    return new NextResponse(unsubPage("Invalid or tampered link.", false), {
       headers: { "Content-Type": "text/html" },
       status: 400,
     });

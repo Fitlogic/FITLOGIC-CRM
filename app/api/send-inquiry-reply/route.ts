@@ -1,17 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
-
-function replaceVariables(
-  template: string,
-  variables?: Record<string, string | number | null | undefined>,
-): string {
-  if (!variables) return template;
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    const value = variables[key];
-    return value != null ? String(value) : match;
-  });
-}
+import { applyEmailVars } from "@/lib/email-vars";
 
 export async function POST(req: NextRequest) {
   try {
@@ -46,9 +36,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email provider not configured" }, { status: 500 });
     }
 
-    const processedReplyText = replaceVariables(reply_text, variables);
+    const processedReplyText = applyEmailVars(reply_text, variables);
     const rawBody = html_content
-      ? replaceVariables(html_content, variables)
+      ? applyEmailVars(html_content, variables)
       : `<p>${processedReplyText.replace(/\n/g, "<br>")}</p>`;
     const signature = `<p style="margin-top:24px;font-size:12px;color:#888;border-top:1px solid #eee;padding-top:12px;">
   Fit Logic · <a href="mailto:${fromAddress}" style="color:#888;">${fromAddress}</a>

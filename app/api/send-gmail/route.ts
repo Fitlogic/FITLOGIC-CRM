@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
+import { applyEmailVars } from "@/lib/email-vars";
+import { sanitizeEmailHtml } from "@/lib/emailSender";
 
 interface GmailToken {
   access_token: string;
@@ -23,17 +25,9 @@ interface SendEmailRequest {
   variables?: Record<string, string | number | null | undefined>;
 }
 
-// Replace template variables like {{first_name}} with actual values
-function replaceVariables(
-  template: string,
-  variables?: Record<string, string | number | null | undefined>
-): string {
-  if (!variables) return template;
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    const value = variables[key];
-    return value != null ? String(value) : match;
-  });
-}
+// Variable substitution moved to @/lib/email-vars (applyEmailVars) — supports
+// both `{key}` and `{{key}}` syntaxes so admin-authored copy from any editor
+// works without per-route adjustments.
 
 async function getValidAccessToken(token: GmailToken): Promise<string | null> {
   const expiresAt = new Date(token.expires_at).getTime();
@@ -184,9 +178,12 @@ export async function POST(req: Request) {
     const body = await req.json() as SendEmailRequest;
     const { to, toName, subject, html, attachments, variables } = body;
 
-    // Apply variable replacement to subject and html
-    const processedSubject = replaceVariables(subject, variables);
-    const processedHtml = replaceVariables(html, variables);
+    // Apply variable replacement, then sanitize so a malicious value injected
+    // through `variables` (e.g. first_name = "<script>...") gets stripped
+    // before we hand the message to Gmail. Previously this path skipped
+    // sanitization entirely.
+    const processedSubject = applyEmailVars(subject, variables);
+    const processedHtml = sanitizeEmailHtml(applyEmailVars(html, variables));
 
     if (!to || !subject) {
       return NextResponse.json(

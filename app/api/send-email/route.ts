@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
+import { applyEmailVars } from "@/lib/email-vars";
 
 interface SendEmailAttachment {
   filename: string;
@@ -19,16 +20,9 @@ interface SendEmailRequest {
   attachments?: SendEmailAttachment[];
 }
 
-function replaceVariables(
-  template: string,
-  variables?: Record<string, string | number | null | undefined>,
-): string {
-  if (!variables) return template;
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    const value = variables[key];
-    return value != null ? String(value) : match;
-  });
-}
+// Variable substitution moved to @/lib/email-vars (applyEmailVars) — accepts
+// both `{key}` and `{{key}}` so the same template works regardless of which
+// editor it came out of.
 
 /**
  * One-off email send used by the Compose dialog in Patients.
@@ -72,8 +66,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const processedSubject = replaceVariables(subject, variables);
-    const processedBody = sanitizeEmailHtml(replaceVariables(html, variables));
+    const processedSubject = applyEmailVars(subject, variables);
+    const processedBody = sanitizeEmailHtml(applyEmailVars(html, variables));
     const wrappedHtml = wrapEmailHtml({ bodyFragment: processedBody });
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
