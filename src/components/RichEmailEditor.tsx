@@ -8,8 +8,8 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Bold, Italic, Link, List, ListOrdered, Eye, Code, Type, Smartphone, Monitor,
   User, Building, Mail, Calendar, Variable, Search, Plus, X, Palette,
-  AlignLeft, AlignCenter, AlignRight, Heading1, Undo, Redo,
-  MousePointerClick, Check, Image as ImageIcon, Paperclip, Strikethrough
+  AlignLeft, AlignCenter, AlignRight, Heading1, Heading2, Quote, Undo, Redo,
+  MousePointerClick, Check, ChevronDown, SeparatorHorizontal, Image as ImageIcon, Paperclip, Strikethrough
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
