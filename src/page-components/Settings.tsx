@@ -8,8 +8,9 @@ import { toast } from "sonner";
 import {
   Settings as SettingsIcon, Building2, Users, Plug, Mail,
   Save, Trash2, Plus, CheckCircle2, ExternalLink,
-  Clock, Loader2, Tag,
+  Clock, Loader2, Tag, FlaskConical,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 function GoogleCalendarIcon({ className }: { className?: string }) {
   return (
@@ -64,6 +65,8 @@ type PracticeSettings = {
   email_provider_api_key: string | null;
   email_from_address: string | null;
   email_from_name: string | null;
+  /** When true, only patients flagged is_test_contact=true receive sends. */
+  test_mode_only?: boolean | null;
 };
 
 type StaffRow = {
@@ -851,8 +854,51 @@ function CampaignDefaultsTab({ settings, onSave }: { settings: PracticeSettings;
     max_sends_per_day: settings.max_sends_per_day,
   });
 
+  // Test mode is the most consequential safety toggle in the app — flipping
+  // it accidentally either floods real prospects or silently drops every
+  // send, so it gets its own optimistic mutation with explicit toast copy
+  // instead of being lumped into the form save.
+  const testModeOn = settings.test_mode_only ?? true;
+
   return (
     <div className="space-y-6">
+      {/* Test Mode toggle — gates EVERY outbound send */}
+      <Card className={testModeOn ? "border-amber-300/60" : undefined}>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <FlaskConical className={`h-4 w-4 ${testModeOn ? "text-amber-600" : "text-muted-foreground"}`} />
+            Test Mode
+          </CardTitle>
+          <CardDescription className="text-xs">
+            When on, only contacts flagged <code className="px-1 rounded bg-muted font-mono text-[11px]">is_test_contact</code> actually receive sends. Every other recipient in a campaign or sequence is silently skipped server-side. Turn this off to send real emails to real contacts.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-start justify-between gap-4 rounded-lg border bg-card px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">
+                {testModeOn ? "Test mode is ON" : "Test mode is OFF — real sends"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {testModeOn
+                  ? "Send Now and the daily 8am Texas cron will only deliver to contacts flagged is_test_contact = true."
+                  : "Every recipient in your campaigns will receive emails. Make sure your contact list is what you intend before sending."}
+              </p>
+            </div>
+            <Switch
+              checked={testModeOn}
+              onCheckedChange={(checked) => onSave({ test_mode_only: checked })}
+              aria-label="Toggle test mode"
+            />
+          </div>
+          {testModeOn && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              Tip: open the Contacts page and toggle <code className="font-mono">Test Contact</code> on at least one row so Send Now has someone to deliver to.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -966,17 +1012,18 @@ const Settings = () => {
 
   const updateSettings = useMutation({
     mutationFn: async (updates: Partial<PracticeSettings>) => {
+      // Cast through unknown — the auto-generated supabase types predate
+      // the test_mode_only column, so the typed update/insert rejects it.
+      const table = supabase.from("practice_settings") as unknown as {
+        update: (vals: Record<string, unknown>) => { eq: (c: string, v: string) => Promise<{ error: unknown }> };
+        insert: (vals: Record<string, unknown>) => Promise<{ error: unknown }>;
+      };
       if (settings.id) {
-        const { error } = await supabase
-          .from("practice_settings")
-          .update(updates)
-          .eq("id", settings.id);
-        if (error) throw error;
+        const { error } = await table.update(updates).eq("id", settings.id);
+        if (error) throw error as Error;
       } else {
-        const { error } = await supabase
-          .from("practice_settings")
-          .insert({ ...updates });
-        if (error) throw error;
+        const { error } = await table.insert({ ...updates });
+        if (error) throw error as Error;
       }
     },
     onSuccess: () => {

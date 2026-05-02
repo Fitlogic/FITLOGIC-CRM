@@ -29,11 +29,10 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
     .limit(1)
     .single();
 
-  // While the practice is on the shared API key, only contacts flagged
-  // patients.is_test_contact = true are eligible to receive sends. Megan flips
-  // practice_settings.test_mode_only to false once she is on her own key. The
-  // auto-generated supabase types in src/integrations/supabase/types.ts
-  // predate this column so we fetch it through a separate untyped read.
+  // Test mode is read from practice_settings.test_mode_only. When on, only
+  // contacts flagged patients.is_test_contact=true receive sends; everyone
+  // else is silently skipped. Toggle in Settings → Campaign Defaults.
+  // Cast through unknown — auto-generated supabase types predate this column.
   const { data: testModeRow } = await (supabase.from("practice_settings") as unknown as {
     select: (cols: string) => { limit: (n: number) => { single: () => Promise<{ data: { test_mode_only?: boolean } | null }> } };
   })
@@ -130,22 +129,98 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
     }
 
     const isSequence = campaign.campaign_type === "sequence";
-    let sequences: { step_number: number; delay_days: number; subject_override: string | null; body_html_override: string | null }[] = [];
+    type SequenceRow = {
+      step_number: number;
+      delay_days: number;
+      subject_override: string | null;
+      body_html_override: string | null;
+      attachments?: { filename: string; content: string; mimeType: string }[] | null;
+    };
+    let sequences: SequenceRow[] = [];
 
     if (isSequence) {
-      const { data: seqs } = await supabase
-        .from("campaign_sequences")
-        .select("step_number, delay_days, subject_override, body_html_override")
+      // Defensive load: try with attachments (migration 20260502000001), fall
+      // back to legacy columns if the column doesn't exist on the live DB.
+      // Without this fallback the SELECT silently errored and every recipient
+      // got marked completed without sending.
+      const tableAny = supabase.from("campaign_sequences") as unknown as {
+        select: (cols: string) => {
+          eq: (col: string, val: string) => {
+            order: (col: string) => Promise<{ data: SequenceRow[] | null; error: { message: string; code?: string } | null }>;
+          };
+        };
+      };
+      let seqs: SequenceRow[] | null = null;
+      let seqErr: { message: string; code?: string } | null = null;
+      const withA = await tableAny
+        .select("step_number, delay_days, subject_override, body_html_override, attachments")
         .eq("campaign_id", campaign.id)
         .order("step_number");
+      if (withA.error) {
+        console.warn("[cron/schedule] sequence SELECT with attachments failed; falling back", {
+          campaign: campaign.name,
+          error: withA.error.message,
+          hint: "Run migration 20260502000001_email_attachments.sql to enable per-step attachments.",
+        });
+        const fb = await tableAny
+          .select("step_number, delay_days, subject_override, body_html_override")
+          .eq("campaign_id", campaign.id)
+          .order("step_number");
+        seqs = fb.data;
+        seqErr = fb.error;
+      } else {
+        seqs = withA.data;
+      }
+      if (seqErr) {
+        console.error("[cron/schedule] sequence SELECT failed even after fallback", {
+          campaign: campaign.name,
+          campaign_id: campaign.id,
+          error: seqErr.message,
+        });
+        throw new Error(`Failed to load sequence steps for "${campaign.name}": ${seqErr.message}`);
+      }
       sequences = seqs ?? [];
+      console.log("[cron/schedule] sequence steps loaded", {
+        campaign: campaign.name,
+        step_count: sequences.length,
+        step_numbers: sequences.map((s) => s.step_number),
+      });
     }
 
     let templateSubject = "";
     let templateBody = "";
+    let templateAttachments: { filename: string; content: string; mimeType: string }[] = [];
     if (!isSequence && campaign.template_id) {
-      const { data: tmpl } = await supabase.from("email_templates").select("subject, body_html").eq("id", campaign.template_id).single();
-      if (tmpl) { templateSubject = tmpl.subject; templateBody = tmpl.body_html ?? ""; }
+      const tplAny = supabase.from("email_templates") as unknown as {
+        select: (cols: string) => { eq: (c: string, v: string) => { single: () => Promise<{ data: { subject: string; body_html: string | null; attachments?: typeof templateAttachments | null } | null; error: { message: string } | null }> } };
+      };
+      let tmpl: { subject: string; body_html: string | null; attachments?: typeof templateAttachments | null } | null = null;
+      let tplErr: { message: string } | null = null;
+      const withA = await tplAny.select("subject, body_html, attachments").eq("id", campaign.template_id).single();
+      if (withA.error) {
+        console.warn("[cron/schedule] template SELECT with attachments failed; falling back", {
+          campaign: campaign.name,
+          error: withA.error.message,
+        });
+        const fb = await tplAny.select("subject, body_html").eq("id", campaign.template_id).single();
+        tmpl = fb.data;
+        tplErr = fb.error;
+      } else {
+        tmpl = withA.data;
+      }
+      if (tplErr) {
+        console.error("[cron/schedule] template SELECT failed", {
+          campaign: campaign.name,
+          template_id: campaign.template_id,
+          error: tplErr.message,
+        });
+        throw new Error(`Failed to load template for "${campaign.name}": ${tplErr.message}`);
+      }
+      if (tmpl) {
+        templateSubject = tmpl.subject;
+        templateBody = tmpl.body_html ?? "";
+        templateAttachments = Array.isArray(tmpl.attachments) ? tmpl.attachments : [];
+      }
     }
 
     const { data: pendingRecipients } = await supabase
@@ -226,11 +301,29 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       let subject = "";
       let bodyHtml = "";
       let stepNumber = 1;
+      let stepAttachments: { filename: string; content: string; mimeType: string }[] = [];
 
       if (isSequence) {
         const currentStep = recipient.current_step ?? 0;
         const nextStep = sequences.find((s) => s.step_number === currentStep + 1);
-        if (!nextStep) { await supabase.from("campaign_recipients").update({ status: "completed" }).eq("id", recipient.id); continue; }
+        if (!nextStep) {
+          const isFirstSendAttempt = currentStep === 0;
+          const reason = isFirstSendAttempt
+            ? `Sequence has no step ${currentStep + 1} — only steps [${sequences.map((s) => s.step_number).join(", ") || "none"}] exist.`
+            : "Sequence completed (no further steps)";
+          await supabase
+            .from("campaign_recipients")
+            .update({ status: "completed", last_error: reason })
+            .eq("id", recipient.id);
+          if (isFirstSendAttempt) {
+            console.warn("[cron/schedule] recipient skipped — missing sequence step", {
+              recipient: recipient.email,
+              current_step: currentStep,
+              available_steps: sequences.map((s) => s.step_number),
+            });
+          }
+          continue;
+        }
 
         if (nextStep.delay_days > 0) {
           const { data: lastSend } = await supabase
@@ -252,9 +345,11 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
         subject = nextStep.subject_override ?? "";
         bodyHtml = nextStep.body_html_override ?? "";
         stepNumber = nextStep.step_number;
+        stepAttachments = Array.isArray(nextStep.attachments) ? nextStep.attachments : [];
       } else {
         subject = templateSubject;
         bodyHtml = templateBody;
+        stepAttachments = templateAttachments;
       }
 
       if (!subject || !bodyHtml) {
@@ -282,7 +377,17 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
 
       await supabase.from("campaign_send_log").insert({ campaign_id: campaign.id, recipient_id: recipient.id, step_number: stepNumber, status: "queued", tracking_id: trackingId });
 
-      const sendResult = await sendEmail(emailApiKey, { to: recipient.email, toName: recipient.name, subject, html: finalHtml, from: fromHeader, listUnsubscribeUrl: unsubLink, trackingId }, baseUrl, hasGmail);
+      const sendResult = await sendEmail(
+        emailApiKey,
+        {
+          to: recipient.email, toName: recipient.name,
+          subject, html: finalHtml,
+          from: fromHeader, listUnsubscribeUrl: unsubLink, trackingId,
+          attachments: stepAttachments.length ? stepAttachments : undefined,
+        },
+        baseUrl,
+        hasGmail,
+      );
 
       if (sendResult.success) {
         await supabase.from("campaign_send_log").update({ status: "sent", sent_at: now.toISOString() }).eq("tracking_id", trackingId);

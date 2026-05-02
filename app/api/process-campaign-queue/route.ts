@@ -15,12 +15,12 @@ async function updateCampaignStats(supabase: SupabaseClient, campaignId: string)
   await supabase.from("campaigns").update({ stats }).eq("id", campaignId);
 }
 
-// Hardcoded Texas timezone for ~8am daily sends.
-// Vercel cron is UTC-only ("0 14 * * *" = 14:00 UTC). That is 8am CST in winter
-// but 9am CDT in summer. Accept either hour so DST does not silently skip an
-// entire half of the year.
-const TEXAS_TIMEZONE = "America/Chicago";
-const SEND_HOURS = [8, 9];
+// This POST endpoint is the manual-trigger path. It has NO hour gate and NO
+// weekday gate so "Send Now" fires immediately regardless of local time —
+// previously both gates caused first-step sends to silently skip outside the
+// 8–9am Texas window or on weekends. The cron route
+// (`app/api/cron/schedule/route.ts`) keeps both gates intact so the daily
+// 8am-Texas Mon–Fri batch still fires once and only once per business day.
 
 export async function POST(req: NextRequest) {
   const supabase = serverClient();
@@ -32,12 +32,11 @@ export async function POST(req: NextRequest) {
       .limit(1)
       .single();
 
-    // While the practice is on the shared API key, only contacts flagged
-    // patients.is_test_contact = true are eligible to receive sends. Megan
-    // flips practice_settings.test_mode_only to false once she is on her own
-    // Resend/SendGrid key. The auto-generated supabase types in
-    // src/integrations/supabase/types.ts predate this column so we fetch it
-    // through a separate untyped read.
+    // Test mode is read from practice_settings.test_mode_only. When on, only
+    // contacts flagged patients.is_test_contact=true receive sends; everyone
+    // else is silently skipped. Toggle in Settings → Campaign Defaults.
+    // Cast through unknown — auto-generated supabase types in
+    // src/integrations/supabase/types.ts predate this column.
     const { data: testModeRow } = await (supabase.from("practice_settings") as unknown as {
       select: (cols: string) => { limit: (n: number) => { single: () => Promise<{ data: { test_mode_only?: boolean } | null }> } };
     })
@@ -56,25 +55,23 @@ export async function POST(req: NextRequest) {
     const hasGmail = !!(settings as unknown as { google_gmail_token?: unknown })?.google_gmail_token;
 
     if (!emailApiKey || !fromAddress) {
-      console.warn("Email provider not fully configured. Sends will be logged as failed.");
+      console.warn("[process-campaign-queue] Email provider not fully configured.", {
+        hasResendKey: !!emailApiKey,
+        hasFromAddress: !!fromAddress,
+        hasGmail,
+      });
     }
+
+    console.log("[process-campaign-queue] starting run", {
+      testModeOnly,
+      hasResendKey: !!emailApiKey,
+      hasFromAddress: !!fromAddress,
+      hasGmail,
+    });
 
     const now = new Date();
 
-    // Get current time in Texas timezone
-    const texasTimeStr = now.toLocaleString("en-US", { timeZone: TEXAS_TIMEZONE });
-    const texasNow = new Date(texasTimeStr);
-    const currentHour = texasNow.getHours();
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const currentDay = dayNames[texasNow.getDay()];
-
-    // Only process during the 8–9am Texas window (covers CST + CDT).
-    if (!SEND_HOURS.includes(currentHour)) {
-      return NextResponse.json({ message: `Skipped - current Texas time is ${currentHour}:00, outside send window ${SEND_HOURS.join("/")}` });
-    }
-
-    // Get today's date in Texas timezone for duplicate prevention
-    const texasDateStr = texasNow.toLocaleDateString("en-CA"); // YYYY-MM-DD
+    // No timezone-based gating on this manual path — see header comment.
 
     const { data: campaigns, error: campErr } = await supabase
       .from("campaigns")
@@ -94,12 +91,9 @@ export async function POST(req: NextRequest) {
     const results: unknown[] = [];
 
     for (const campaign of campaigns) {
-      // Only send on weekdays (Mon-Fri) at 8am Texas time
-      const businessDays = ["Mon", "Tue", "Wed", "Thu", "Fri"];
-      if (!businessDays.includes(currentDay)) {
-        results.push({ campaign: campaign.name, skipped: "not a business day (Mon-Fri only)" });
-        continue;
-      }
+      // No weekday gate on the manual-trigger path. "Send Now" should fire
+      // immediately even on Saturday/Sunday — the cron route still gates so
+      // automated background sends respect business hours.
 
       const maxSends = campaign.max_sends_per_day ?? settings?.max_sends_per_day ?? 500;
       const todayStart = new Date(now);
@@ -120,22 +114,104 @@ export async function POST(req: NextRequest) {
       }
 
       const isSequence = campaign.campaign_type === "sequence";
-      let sequences: { step_number: number; delay_days: number; subject_override: string | null; body_html_override: string | null }[] = [];
+      type SequenceRow = {
+        step_number: number;
+        delay_days: number;
+        subject_override: string | null;
+        body_html_override: string | null;
+        attachments?: { filename: string; content: string; mimeType: string }[] | null;
+      };
+      let sequences: SequenceRow[] = [];
 
       if (isSequence) {
-        const { data: seqs } = await supabase
-          .from("campaign_sequences")
-          .select("step_number, delay_days, subject_override, body_html_override")
+        // First try with the attachments column (added in migration
+        // 20260502000001). If the migration hasn't been applied to the live
+        // DB yet, the SELECT errors with "column does not exist" — previously
+        // we ignored the error and treated the campaign as having zero
+        // steps, silently completing every recipient. Fall back to the
+        // legacy column set so sends keep working pre-migration.
+        const tableAny = supabase.from("campaign_sequences") as unknown as {
+          select: (cols: string) => {
+            eq: (col: string, val: string) => {
+              order: (col: string) => Promise<{ data: SequenceRow[] | null; error: { message: string; code?: string } | null }>;
+            };
+          };
+        };
+        let seqs: SequenceRow[] | null = null;
+        let seqErr: { message: string; code?: string } | null = null;
+        const withAttachments = await tableAny
+          .select("step_number, delay_days, subject_override, body_html_override, attachments")
           .eq("campaign_id", campaign.id)
           .order("step_number");
+        if (withAttachments.error) {
+          console.warn("[process-campaign-queue] sequence SELECT with attachments failed; falling back", {
+            campaign: campaign.name,
+            error: withAttachments.error.message,
+            hint: "Run migration 20260502000001_email_attachments.sql to enable per-step attachments.",
+          });
+          const fallback = await tableAny
+            .select("step_number, delay_days, subject_override, body_html_override")
+            .eq("campaign_id", campaign.id)
+            .order("step_number");
+          seqs = fallback.data;
+          seqErr = fallback.error;
+        } else {
+          seqs = withAttachments.data;
+        }
+        if (seqErr) {
+          console.error("[process-campaign-queue] sequence SELECT failed even after fallback", {
+            campaign: campaign.name,
+            campaign_id: campaign.id,
+            error: seqErr.message,
+            code: seqErr.code,
+          });
+          throw new Error(`Failed to load sequence steps for "${campaign.name}": ${seqErr.message}`);
+        }
         sequences = seqs ?? [];
+        console.log("[process-campaign-queue] sequence steps loaded", {
+          campaign: campaign.name,
+          step_count: sequences.length,
+          step_numbers: sequences.map((s) => s.step_number),
+          step_subjects: sequences.map((s) => s.subject_override?.slice(0, 40) ?? "(empty)"),
+        });
       }
 
       let templateSubject = "";
       let templateBody = "";
+      let templateAttachments: { filename: string; content: string; mimeType: string }[] = [];
       if (!isSequence && campaign.template_id) {
-        const { data: tmpl } = await supabase.from("email_templates").select("subject, body_html").eq("id", campaign.template_id).single();
-        if (tmpl) { templateSubject = tmpl.subject; templateBody = tmpl.body_html ?? ""; }
+        // Same defensive pattern as the sequence load: try with attachments,
+        // fall back without if the column isn't on this DB yet.
+        const tplAny = supabase.from("email_templates") as unknown as {
+          select: (cols: string) => { eq: (c: string, v: string) => { single: () => Promise<{ data: { subject: string; body_html: string | null; attachments?: typeof templateAttachments | null } | null; error: { message: string } | null }> } };
+        };
+        let tmpl: { subject: string; body_html: string | null; attachments?: typeof templateAttachments | null } | null = null;
+        let tplErr: { message: string } | null = null;
+        const withA = await tplAny.select("subject, body_html, attachments").eq("id", campaign.template_id).single();
+        if (withA.error) {
+          console.warn("[process-campaign-queue] template SELECT with attachments failed; falling back", {
+            campaign: campaign.name,
+            error: withA.error.message,
+          });
+          const fb = await tplAny.select("subject, body_html").eq("id", campaign.template_id).single();
+          tmpl = fb.data;
+          tplErr = fb.error;
+        } else {
+          tmpl = withA.data;
+        }
+        if (tplErr) {
+          console.error("[process-campaign-queue] template SELECT failed", {
+            campaign: campaign.name,
+            template_id: campaign.template_id,
+            error: tplErr.message,
+          });
+          throw new Error(`Failed to load template for "${campaign.name}": ${tplErr.message}`);
+        }
+        if (tmpl) {
+          templateSubject = tmpl.subject;
+          templateBody = tmpl.body_html ?? "";
+          templateAttachments = Array.isArray(tmpl.attachments) ? tmpl.attachments : [];
+        }
       }
 
       const { data: pendingRecipients } = await supabase
@@ -195,12 +271,35 @@ export async function POST(req: NextRequest) {
       let sentCount = 0;
       let failedCount = 0;
       let skippedCount = 0;
+      // Per-reason skip counters drive the diagnostic toast in the UI so the
+      // user understands WHY their Send Now produced 0 emails (test mode is
+      // by far the most common cause of silent zero-send runs).
+      const skipReasons = {
+        test_mode: 0,
+        suppressed: 0,
+        unsubscribed: 0,
+        sequence_delay: 0,
+        // Recipient's current_step + 1 doesn't exist in campaign_sequences.
+        // For a brand-new recipient (current_step=0) this means the sequence
+        // has no row with step_number=1 — i.e. the sequence was never built.
+        no_sequence_step: 0,
+        // Recipient already advanced past the last step — sequence completed.
+        sequence_completed: 0,
+      };
+      let firstSendError: string | null = null;
 
       for (const recipient of pendingRecipients) {
         const emailLower = recipient.email.toLowerCase();
-        if (suppressedEmails.has(emailLower) || unsubEmails.has(emailLower)) {
-          await supabase.from("campaign_recipients").update({ status: "skipped", last_error: "Suppressed or unsubscribed" }).eq("id", recipient.id);
+        if (suppressedEmails.has(emailLower)) {
+          await supabase.from("campaign_recipients").update({ status: "skipped", last_error: "Suppressed (hard bounce or complaint)" }).eq("id", recipient.id);
           skippedCount++;
+          skipReasons.suppressed++;
+          continue;
+        }
+        if (unsubEmails.has(emailLower)) {
+          await supabase.from("campaign_recipients").update({ status: "skipped", last_error: "Unsubscribed from this campaign" }).eq("id", recipient.id);
+          skippedCount++;
+          skipReasons.unsubscribed++;
           continue;
         }
 
@@ -210,17 +309,47 @@ export async function POST(req: NextRequest) {
             .update({ status: "skipped", last_error: "Test mode — only contacts flagged is_test_contact=true receive sends" })
             .eq("id", recipient.id);
           skippedCount++;
+          skipReasons.test_mode++;
           continue;
         }
 
         let subject = "";
         let bodyHtml = "";
         let stepNumber = 1;
+        let stepAttachments: { filename: string; content: string; mimeType: string }[] = [];
 
         if (isSequence) {
           const currentStep = recipient.current_step ?? 0;
           const nextStep = sequences.find((s) => s.step_number === currentStep + 1);
-          if (!nextStep) { await supabase.from("campaign_recipients").update({ status: "completed" }).eq("id", recipient.id); continue; }
+          if (!nextStep) {
+            // Two real-world causes:
+            //  1. Sequence is empty / step 1 never saved → currentStep=0, no
+            //     step_number=1 row. This is a CONFIG bug — surface it loud.
+            //  2. Recipient already advanced past the last step → mark as
+            //     completed so we don't keep checking on every cron run.
+            const isFirstSendAttempt = currentStep === 0;
+            const reason = isFirstSendAttempt
+              ? `Sequence has no step ${currentStep + 1} — only steps [${sequences.map((s) => s.step_number).join(", ") || "none"}] exist. Build/edit the sequence and add step 1.`
+              : "Sequence completed (no further steps)";
+            await supabase
+              .from("campaign_recipients")
+              .update({ status: "completed", last_error: reason })
+              .eq("id", recipient.id);
+            if (isFirstSendAttempt) {
+              skipReasons.no_sequence_step++;
+              skippedCount++;
+              if (!firstSendError) firstSendError = reason;
+              console.warn("[process-campaign-queue] recipient skipped — missing sequence step", {
+                recipient: recipient.email,
+                current_step: currentStep,
+                looking_for: currentStep + 1,
+                available_steps: sequences.map((s) => s.step_number),
+              });
+            } else {
+              skipReasons.sequence_completed++;
+            }
+            continue;
+          }
 
           if (nextStep.delay_days > 0) {
             const { data: lastSend } = await supabase
@@ -235,16 +364,21 @@ export async function POST(req: NextRequest) {
 
             if (lastSend?.sent_at) {
               const elapsed = now.getTime() - new Date(lastSend.sent_at).getTime();
-              if (elapsed < nextStep.delay_days * 86_400_000) continue;
+              if (elapsed < nextStep.delay_days * 86_400_000) {
+                skipReasons.sequence_delay++;
+                continue;
+              }
             }
           }
 
           subject = nextStep.subject_override ?? "";
           bodyHtml = nextStep.body_html_override ?? "";
           stepNumber = nextStep.step_number;
+          stepAttachments = Array.isArray(nextStep.attachments) ? nextStep.attachments : [];
         } else {
           subject = templateSubject;
           bodyHtml = templateBody;
+          stepAttachments = templateAttachments;
         }
 
         if (!subject || !bodyHtml) {
@@ -307,7 +441,17 @@ export async function POST(req: NextRequest) {
         await supabase.from("campaign_send_log").insert({ campaign_id: campaign.id, recipient_id: recipient.id, step_number: stepNumber, status: "queued", tracking_id: trackingId });
 
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-        const sendResult = await sendEmail(emailApiKey, { to: recipient.email, toName: recipient.name, subject, html: finalHtml, from: fromHeader, listUnsubscribeUrl: unsubLink, trackingId }, baseUrl, hasGmail);
+        const sendResult = await sendEmail(
+          emailApiKey,
+          {
+            to: recipient.email, toName: recipient.name,
+            subject, html: finalHtml,
+            from: fromHeader, listUnsubscribeUrl: unsubLink, trackingId,
+            attachments: stepAttachments.length ? stepAttachments : undefined,
+          },
+          baseUrl,
+          hasGmail,
+        );
 
         if (sendResult.success) {
           await supabase.from("campaign_send_log").update({ status: "sent", sent_at: now.toISOString() }).eq("tracking_id", trackingId);
@@ -329,6 +473,8 @@ export async function POST(req: NextRequest) {
           await supabase.from("campaign_send_log").update({ status: "failed", error_message: sendResult.error ?? "Unknown error" }).eq("tracking_id", trackingId);
           await supabase.from("campaign_recipients").update({ status: "failed", last_error: sendResult.error ?? "Send failed" }).eq("id", recipient.id);
           failedCount++;
+          if (!firstSendError) firstSendError = sendResult.error ?? "Send failed";
+          console.error("[process-campaign-queue] send failed", { recipient: recipient.email, error: sendResult.error });
         }
       }
 
@@ -342,10 +488,59 @@ export async function POST(req: NextRequest) {
         await updateCampaignStats(supabase, campaign.id);
       }
 
-      results.push({ campaign: campaign.name, sent: sentCount, failed: failedCount, skipped: skippedCount });
+      results.push({
+        campaign: campaign.name,
+        campaign_id: campaign.id,
+        recipients_considered: pendingRecipients.length,
+        sent: sentCount,
+        failed: failedCount,
+        skipped: skippedCount,
+        skip_reasons: skipReasons,
+        first_error: firstSendError,
+      });
+      console.log("[process-campaign-queue] campaign result", {
+        campaign: campaign.name,
+        recipients_considered: pendingRecipients.length,
+        sent: sentCount, failed: failedCount, skipped: skippedCount,
+        skip_reasons: skipReasons,
+        first_error: firstSendError,
+      });
+      // Sanity check: if the loop processed recipients but every counter is
+      // zero, an untracked `continue` path is swallowing them. Surface that
+      // explicitly so it doesn't masquerade as a successful no-op.
+      if (
+        pendingRecipients.length > 0 &&
+        sentCount === 0 && failedCount === 0 && skippedCount === 0
+      ) {
+        console.error("[process-campaign-queue] silent loop — recipients processed but no counter incremented", {
+          campaign: campaign.name,
+          considered: pendingRecipients.length,
+          isSequence,
+          sequence_step_numbers: sequences.map((s) => s.step_number),
+        });
+      }
     }
 
-    return NextResponse.json({ processed: results });
+    // Aggregate top-level totals so the UI can decide whether the run was a
+    // success without iterating the per-campaign array.
+    const totals = results.reduce(
+      (acc: { sent: number; failed: number; skipped: number; test_mode_skips: number }, r) => {
+        const row = r as { sent?: number; failed?: number; skipped?: number; skip_reasons?: { test_mode?: number } };
+        acc.sent += row.sent ?? 0;
+        acc.failed += row.failed ?? 0;
+        acc.skipped += row.skipped ?? 0;
+        acc.test_mode_skips += row.skip_reasons?.test_mode ?? 0;
+        return acc;
+      },
+      { sent: 0, failed: 0, skipped: 0, test_mode_skips: 0 },
+    );
+
+    return NextResponse.json({
+      processed: results,
+      totals,
+      test_mode_only: testModeOnly,
+      provider_configured: { resend: !!emailApiKey, gmail: hasGmail, from_address: !!fromAddress },
+    });
   } catch (error) {
     console.error("process-campaign-queue error:", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });

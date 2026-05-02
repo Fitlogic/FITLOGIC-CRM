@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { QK } from "@/lib/queryKeys";
+import { fetchAllPatients, getPatientCount } from "@/lib/patient-queries";
 import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -140,15 +141,27 @@ function KpiCard({
 }
 
 export default function Analytics() {
+  // Breakdowns (funnel, won/lost, lead-source, etc.) need every row to bucket
+  // properly, so this batches via .range() until exhausted. The bare
+  // `.select("*")` we used before silently capped at PostgREST's 1000-row
+  // default — a 5000-contact tenant would have seen ~80% of contacts missing
+  // from every chart.
   const { data: patients = [] } = useQuery({
-    queryKey: QK.patients,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("patients")
-        .select("*");
-      if (error) throw error;
-      return data as unknown as PatientAnalyticsRow[];
-    },
+    queryKey: [...QK.patients, "analytics"],
+    queryFn: () =>
+      fetchAllPatients<PatientAnalyticsRow>({
+        select: "id, status, pipeline_stage, pipeline_stage_changed_at, lead_source, deal_value, company, created_at",
+        orderBy: { column: "created_at", ascending: false },
+      }),
+    staleTime: 60_000,
+  });
+
+  // Authoritative total — uses `head: true` count so it's accurate even if a
+  // future change limits how many rows we pull into the breakdowns above.
+  const { data: totalContactCount = 0 } = useQuery({
+    queryKey: [...QK.patients, "analytics-count"],
+    queryFn: () => getPatientCount(),
+    staleTime: 60_000,
   });
 
   const { data: campaigns = [] } = useQuery({
@@ -253,7 +266,11 @@ export default function Analytics() {
   }, [patients, wonLostRange]);
 
   const pipelineKpis = useMemo(() => {
-    const total = patients.length;
+    // Prefer the authoritative count from the head query — it's accurate
+    // independently of what fetchAllPatients pulled in. Fall back to the
+    // length of the loaded array on the very first render before the count
+    // query resolves.
+    const total = totalContactCount || patients.length;
     const openOpportunities = patients.filter((patient) => {
       const stage = patient.pipeline_stage ?? "new_lead";
       return stage !== "won" && stage !== "lost";
@@ -271,7 +288,7 @@ export default function Analytics() {
       winRate: pct(wonDeals, total),
       pipelineValue,
     };
-  }, [patients]);
+  }, [patients, totalContactCount]);
 
   // A1.3: lead-source card has a local date-range chip so Megan can answer
   // "how many leads came in from each source in the last 30 / 90 days."

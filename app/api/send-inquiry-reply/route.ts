@@ -15,7 +15,7 @@ function replaceVariables(
 
 export async function POST(req: NextRequest) {
   try {
-    const { inquiry_id, reply_text, html_content, variables } = await req.json();
+    const { inquiry_id, reply_text, html_content, variables, attachments } = await req.json();
     if (!inquiry_id || !reply_text?.trim()) {
       return NextResponse.json({ error: "inquiry_id and reply_text required" }, { status: 400 });
     }
@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
         subject: "Re: Your message to Fit Logic",
         html: fullHtml,
         from: fromHeader || undefined,
+        attachments: Array.isArray(attachments) && attachments.length ? attachments : undefined,
       },
       baseUrl,
       hasGmail,

@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import type { SegmentRule } from "@/lib/campaign-data";
 import { resolveSegmentMembers } from "@/lib/segment-utils";
+import { fetchAllPatients, getPatientCount } from "@/lib/patient-queries";
 
 export interface Recipient {
   email: string;
@@ -49,17 +50,24 @@ export function CampaignRecipients({ recipients, onChange, campaignId }: Campaig
   const [appliedSegmentId, setAppliedSegmentId] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Customer picker — needs every contact so the user can scroll/search the
+  // full list, not just the first 1000. Batches via .range() under the hood.
   const { data: customers = [] } = useQuery({
     queryKey: ["customers-for-campaign"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("patients")
-        .select("id, first_name, last_name, email")
-        .not("email", "is", null)
-        .order("first_name");
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () =>
+      fetchAllPatients<{ id: string; first_name: string | null; last_name: string | null; email: string | null }>({
+        select: "id, first_name, last_name, email",
+        emailOnly: true,
+        orderBy: { column: "first_name", ascending: true },
+      }),
+    staleTime: 60_000,
+  });
+
+  // Authoritative total for "X of Y" copy in the picker header.
+  const { data: totalEmailableContacts = 0 } = useQuery({
+    queryKey: ["customers-for-campaign-count"],
+    queryFn: () => getPatientCount({ emailOnly: true }),
+    staleTime: 60_000,
   });
 
   const { data: segments = [] } = useQuery({
@@ -70,13 +78,18 @@ export function CampaignRecipients({ recipients, onChange, campaignId }: Campaig
     },
   });
 
-  // All patients for segment evaluation — loaded eagerly so they're ready when a segment is selected
+  // Segment evaluation runs client-side over the full contact set. Without
+  // batching this previously truncated at PostgREST's 1000-row default, so a
+  // segment that should have matched 3000 contacts only ever resolved ~1000
+  // recipients into the campaign.
   const { data: allPatientsForSeg = [] } = useQuery({
     queryKey: ["patients-for-segment-eval"],
-    queryFn: async () => {
-      const { data } = await supabase.from("patients").select("*").not("email", "is", null);
-      return (data ?? []) as unknown as PatientRow[];
-    },
+    queryFn: () =>
+      fetchAllPatients<PatientRow>({
+        select: "*",
+        emailOnly: true,
+      }),
+    staleTime: 60_000,
   });
 
   const segmentMatches = (() => {
@@ -325,6 +338,11 @@ export function CampaignRecipients({ recipients, onChange, campaignId }: Campaig
               <Check className="h-3 w-3 mr-1" />Select All
             </Button>
           </div>
+          <p className="text-[10px] text-muted-foreground px-1">
+            {totalEmailableContacts > 0 && customers.length < totalEmailableContacts
+              ? `Loading ${customers.length.toLocaleString()} of ${totalEmailableContacts.toLocaleString()} contacts…`
+              : `${customers.length.toLocaleString()} contact${customers.length === 1 ? "" : "s"} with email available`}
+          </p>
           <ScrollArea className="h-[180px] rounded border p-1">
             {filteredCustomers.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-8">No customers with emails found</p>

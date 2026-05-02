@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import DOMPurify from "dompurify";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -107,6 +108,23 @@ export function RichEmailEditor({
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const linkInputRef = useRef<HTMLInputElement>(null);
+
+  // Saved practice CTA destinations (configured in Settings → Links). The
+  // table predates the auto-generated supabase types, so we cast through any.
+  type PracticeLink = { id: string; label: string; url: string; is_default?: boolean | null; sort_order?: number | null };
+  const { data: savedLinks = [] } = useQuery<PracticeLink[]>({
+    queryKey: ["practice_links_for_editor"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("practice_links")
+        .select("id, label, url, is_default, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("label", { ascending: true });
+      if (error) return [];
+      return (data ?? []) as PracticeLink[];
+    },
+    staleTime: 5 * 60_000,
+  });
   
   const editorRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -237,8 +255,9 @@ export function RichEmailEditor({
     setTimeout(() => linkInputRef.current?.focus(), 0);
   };
 
-  const insertLink = () => {
-    if (linkUrl && editorRef.current && savedLinkRange.current) {
+  const insertLink = (overrideUrl?: string) => {
+    const urlToUse = overrideUrl ?? linkUrl;
+    if (urlToUse && editorRef.current && savedLinkRange.current) {
       // Restore the editor focus and the saved selection
       editorRef.current.focus();
       const sel = window.getSelection();
@@ -246,7 +265,7 @@ export function RichEmailEditor({
         sel.removeAllRanges();
         sel.addRange(savedLinkRange.current);
       }
-      document.execCommand("createLink", false, linkUrl);
+      document.execCommand("createLink", false, urlToUse);
       // Make all created links open in new tab and have blue underline style
       editorRef.current.querySelectorAll('a').forEach((a) => {
         a.setAttribute('target', '_blank');
@@ -371,22 +390,79 @@ export function RichEmailEditor({
     setShowImageDialog(false);
   };
 
+  // Email-provider attachment limits: Resend caps at 40MB total, Gmail at
+  // 25MB. We enforce the lower bound so the send doesn't fail at the API.
+  const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024; // 25 MB per file
+  const MAX_TOTAL_SIZE = 25 * 1024 * 1024;       // 25 MB combined
+
+  const totalAttachmentSize = attachments.reduce((sum, a) => sum + a.size, 0);
+
   // Handle file attachment
   const handleAttachment = (files: FileList | null) => {
-    if (!files || !onAttachmentsChange) return;
-    
-    Array.from(files).forEach(file => {
+    if (!files || files.length === 0) return;
+
+    if (!onAttachmentsChange) {
+      toast({
+        title: "Attachments not enabled",
+        description: "This editor instance does not accept attachments.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const fileList = Array.from(files);
+    const oversized = fileList.find((f) => f.size > MAX_ATTACHMENT_SIZE);
+    if (oversized) {
+      toast({
+        title: "File too large",
+        description: `${oversized.name} is ${(oversized.size / 1024 / 1024).toFixed(1)} MB. Each file must be under 25 MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const incomingSize = fileList.reduce((s, f) => s + f.size, 0);
+    if (totalAttachmentSize + incomingSize > MAX_TOTAL_SIZE) {
+      toast({
+        title: "Attachment limit exceeded",
+        description: `Total attachments would be ${((totalAttachmentSize + incomingSize) / 1024 / 1024).toFixed(1)} MB. Limit is 25 MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let added = 0;
+    let pending = fileList.length;
+    const next: EmailAttachment[] = [...attachments];
+
+    fileList.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const content = (e.target?.result as string)?.split(',')[1] || '';
-        const newAttachment: EmailAttachment = {
+        const content = (e.target?.result as string)?.split(",")[1] || "";
+        next.push({
           id: Math.random().toString(36).substring(2),
           filename: file.name,
           size: file.size,
           content,
-          mimeType: file.type,
-        };
-        onAttachmentsChange([...attachments, newAttachment]);
+          mimeType: file.type || "application/octet-stream",
+        });
+        added++;
+        pending--;
+        if (pending === 0) {
+          onAttachmentsChange(next);
+          toast({
+            title: added === 1 ? "Attachment added" : `${added} attachments added`,
+            description: fileList.map((f) => f.name).join(", "),
+          });
+        }
+      };
+      reader.onerror = () => {
+        pending--;
+        toast({
+          title: "Failed to read file",
+          description: file.name,
+          variant: "destructive",
+        });
       };
       reader.readAsDataURL(file);
     });
@@ -395,7 +471,27 @@ export function RichEmailEditor({
   // Remove attachment
   const removeAttachment = (id: string) => {
     if (!onAttachmentsChange) return;
-    onAttachmentsChange(attachments.filter(a => a.id !== id));
+    const removed = attachments.find((a) => a.id === id);
+    onAttachmentsChange(attachments.filter((a) => a.id !== id));
+    if (removed) {
+      toast({ title: "Attachment removed", description: removed.filename });
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const fileIconLabel = (mimeType: string, filename: string) => {
+    const ext = filename.split(".").pop()?.toUpperCase() ?? "";
+    if (mimeType.startsWith("image/")) return ext || "IMG";
+    if (mimeType === "application/pdf") return "PDF";
+    if (mimeType.includes("word")) return "DOC";
+    if (mimeType.includes("sheet") || mimeType.includes("excel")) return "XLS";
+    if (mimeType.includes("zip") || mimeType.includes("compressed")) return "ZIP";
+    return ext || "FILE";
   };
 
   // Render email preview - emails always show with light background for accuracy
@@ -549,39 +645,96 @@ export function RichEmailEditor({
               </Button>
               
               {showLinkInput && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-popover border rounded-md shadow-md p-2 w-64">
-                  <div className="flex gap-2">
-                    <Input
-                      ref={linkInputRef}
-                      type="url"
-                      placeholder="https://example.com"
-                      value={linkUrl}
-                      onChange={(e) => setLinkUrl(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") insertLink();
-                        if (e.key === "Escape") {
+                <div
+                  className="absolute top-full left-0 mt-1 z-50 bg-popover border rounded-md shadow-md p-3 w-72 max-w-[calc(100vw-2rem)] space-y-3"
+                  // Stop clicks inside the popover from bubbling out and
+                  // collapsing the saved selection.
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {/* Saved links from Settings → Links */}
+                  {savedLinks.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Saved links
+                      </p>
+                      <div className="max-h-44 overflow-y-auto -mx-1 px-1 space-y-0.5">
+                        {savedLinks.map((link) => (
+                          <button
+                            key={link.id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => insertLink(link.url)}
+                            className="w-full text-left rounded-md px-2 py-1.5 hover:bg-muted/70 transition-colors group"
+                            title={link.url}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Link className="h-3 w-3 text-primary shrink-0" />
+                              <span className="text-xs font-medium text-foreground truncate flex-1 min-w-0">
+                                {link.label}
+                              </span>
+                              {link.is_default && (
+                                <span className="text-[9px] uppercase tracking-wide text-primary/80 shrink-0">
+                                  default
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate ml-[18px]">
+                              {link.url}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Custom URL */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {savedLinks.length > 0 ? "Or paste a custom URL" : "Link URL"}
+                    </p>
+                    <div className="flex gap-1.5 min-w-0">
+                      <Input
+                        ref={linkInputRef}
+                        type="url"
+                        placeholder="https://example.com"
+                        value={linkUrl}
+                        onChange={(e) => setLinkUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") insertLink();
+                          if (e.key === "Escape") {
+                            setShowLinkInput(false);
+                            setLinkUrl("");
+                            savedLinkRange.current = null;
+                          }
+                        }}
+                        className="h-8 text-xs flex-1 min-w-0"
+                      />
+                      <Button
+                        size="sm"
+                        className="h-8 px-2 shrink-0"
+                        onClick={() => insertLink()}
+                        disabled={!linkUrl.trim()}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 shrink-0"
+                        onClick={() => {
                           setShowLinkInput(false);
                           setLinkUrl("");
                           savedLinkRange.current = null;
-                        }
-                      }}
-                      className="h-8 text-xs"
-                    />
-                    <Button size="sm" className="h-8 px-2" onClick={insertLink}>
-                      <Check className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2"
-                      onClick={() => {
-                        setShowLinkInput(false);
-                        setLinkUrl("");
-                        savedLinkRange.current = null;
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {savedLinks.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Tip: save reusable destinations in Settings → Links to pick them here.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -615,27 +768,39 @@ export function RichEmailEditor({
 
             <Separator orientation="vertical" className="h-6 mx-1" />
 
-            {/* Attachment */}
-            <label className="cursor-pointer">
-              <input
-                type="file"
-                className="hidden"
-                multiple
-                onChange={(e) => handleAttachment(e.target.files)}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 gap-1.5"
-                onMouseDown={(e) => e.preventDefault()}
-                asChild
-              >
-                <span>
-                  <Paperclip className="h-4 w-4" />
-                  <span className="text-xs">Attach</span>
-                </span>
-              </Button>
-            </label>
+            {/* Attachment — only shown when the parent has wired up the
+                attachments callback; otherwise it would be a dead button. */}
+            {onAttachmentsChange && (
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  className="hidden"
+                  multiple
+                  onChange={(e) => {
+                    handleAttachment(e.target.files);
+                    // Reset so picking the same file again still fires onChange
+                    (e.target as HTMLInputElement).value = "";
+                  }}
+                />
+                <Button
+                  variant={attachments.length > 0 ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 px-2 gap-1.5 relative"
+                  onMouseDown={(e) => e.preventDefault()}
+                  asChild
+                >
+                  <span>
+                    <Paperclip className="h-4 w-4" />
+                    <span className="text-xs">Attach</span>
+                    {attachments.length > 0 && (
+                      <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">
+                        {attachments.length}
+                      </span>
+                    )}
+                  </span>
+                </Button>
+              </label>
+            )}
           </>
         )}
 
@@ -738,8 +903,11 @@ export function RichEmailEditor({
               onMouseUp={saveSelection}
               onKeyUp={saveSelection}
               onBlur={handleEditorInput}
-              className="min-h-[300px] p-4 rounded-md border border-input text-foreground resize-y overflow-auto focus:outline-none focus:ring-2 focus:ring-ring focus:border-input [&_a]:text-blue-600 [&_a]:underline [&_a]:cursor-pointer dark:[&_a]:text-blue-400"
-              style={{ minHeight }}
+              // word-break + overflow-wrap stop a long pasted URL (or any
+              // unbroken string) from forcing the parent dialog to scroll
+              // sideways. max-w-full keeps the editor pinned to the dialog.
+              className="min-h-[300px] max-w-full p-4 rounded-md border border-input text-foreground resize-y overflow-auto focus:outline-none focus:ring-2 focus:ring-ring focus:border-input [&_a]:text-blue-600 [&_a]:underline [&_a]:cursor-pointer dark:[&_a]:text-blue-400 [&_a]:break-all [&_img]:max-w-full"
+              style={{ minHeight, wordBreak: "break-word", overflowWrap: "anywhere" }}
             />
             <p className="text-[10px] text-muted-foreground mt-2">
               <span className="font-medium">Tip:</span> Select text to format it. Click "Button" to add CTAs.
@@ -774,44 +942,127 @@ export function RichEmailEditor({
         )}
       </div>
 
-      {/* Attachments Section */}
-      {onAttachmentsChange && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors">
-              <Paperclip className="h-4 w-4" />
-              <span>Add attachment</span>
-              <input
-                type="file"
-                className="hidden"
-                multiple
-                onChange={(e) => handleAttachment(e.target.files)}
-              />
-            </label>
+      {/* Attachments — render whenever attachments exist OR the parent has
+          opted in via onAttachmentsChange. Previously this whole block was
+          gated on the prop, which made it invisible when the prop was missing
+          AND meant pre-loaded attachments wouldn't render in read-only views. */}
+      {(onAttachmentsChange || attachments.length > 0) && (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/30">
+            <div className="flex items-center gap-2.5">
+              <div className="h-7 w-7 rounded-md bg-primary/10 flex items-center justify-center">
+                <Paperclip className="h-3.5 w-3.5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground leading-tight">
+                  Attachments
+                  {attachments.length > 0 && (
+                    <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                      · {attachments.length} file{attachments.length === 1 ? "" : "s"} · {formatBytes(totalAttachmentSize)}
+                    </span>
+                  )}
+                </p>
+                {attachments.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Files attached here will be sent with the email. Max 25 MB total.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {onAttachmentsChange && (
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  className="hidden"
+                  multiple
+                  onChange={(e) => {
+                    handleAttachment(e.target.files);
+                    (e.target as HTMLInputElement).value = "";
+                  }}
+                />
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" asChild>
+                  <span>
+                    <Plus className="h-3 w-3" />
+                    {attachments.length > 0 ? "Add more" : "Add files"}
+                  </span>
+                </Button>
+              </label>
+            )}
           </div>
-          
+
+          {/* List */}
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="divide-y divide-border">
               {attachments.map((attachment) => (
                 <div
                   key={attachment.id}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-md text-sm"
+                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40 transition-colors group"
                 >
-                  <Paperclip className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="max-w-[150px] truncate">{attachment.filename}</span>
-                  <span className="text-xs text-muted-foreground">
-                    ({(attachment.size / 1024).toFixed(1)} KB)
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-5 w-5 p-0 ml-1"
-                    onClick={() => removeAttachment(attachment.id)}
+                  {/* File-type label tile */}
+                  <div
+                    className={cn(
+                      "h-9 w-9 rounded-md flex items-center justify-center text-[9px] font-bold tracking-wider shrink-0",
+                      attachment.mimeType.startsWith("image/")
+                        ? "bg-violet-500/10 text-violet-600"
+                        : attachment.mimeType === "application/pdf"
+                        ? "bg-red-500/10 text-red-600"
+                        : attachment.mimeType.includes("sheet") || attachment.mimeType.includes("excel")
+                        ? "bg-emerald-500/10 text-emerald-600"
+                        : attachment.mimeType.includes("word")
+                        ? "bg-blue-500/10 text-blue-600"
+                        : "bg-muted text-muted-foreground",
+                    )}
                   >
-                    <X className="h-3 w-3" />
-                  </Button>
+                    {fileIconLabel(attachment.mimeType, attachment.filename)}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate" title={attachment.filename}>
+                      {attachment.filename}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatBytes(attachment.size)} · {attachment.mimeType || "unknown type"}
+                    </p>
+                  </div>
+
+                  {onAttachmentsChange && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-60 group-hover:opacity-100 transition-opacity"
+                      onClick={() => removeAttachment(attachment.id)}
+                      title={`Remove ${attachment.filename}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Total bar — visible warning when nearing the 25 MB cap */}
+          {attachments.length > 0 && (
+            <div className="px-4 py-2 border-t border-border bg-muted/20">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-muted-foreground">
+                  {formatBytes(totalAttachmentSize)} of 25 MB used
+                </span>
+                {totalAttachmentSize > MAX_TOTAL_SIZE * 0.8 && (
+                  <span className="text-amber-600 font-medium">Approaching limit</span>
+                )}
+              </div>
+              <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    totalAttachmentSize > MAX_TOTAL_SIZE * 0.8 ? "bg-amber-500" : "bg-primary",
+                  )}
+                  style={{ width: `${Math.min(100, (totalAttachmentSize / MAX_TOTAL_SIZE) * 100)}%` }}
+                />
+              </div>
             </div>
           )}
         </div>

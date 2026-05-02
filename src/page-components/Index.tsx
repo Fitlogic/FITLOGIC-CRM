@@ -717,7 +717,7 @@ const Index = () => {
   const recentCampaigns = campaigns.slice(0, 4);
 
   const metrics = [
-    { label: "Total Contacts",    value: contacts.length,               icon: Users,            color: "text-primary",     bg: "bg-primary/10",     action: () => router.push("/contacts") },
+    { label: "Total Contacts",    value: totalContactCount || contacts.length, icon: Users,        color: "text-primary",     bg: "bg-primary/10",     action: () => router.push("/contacts") },
     { label: "Active Contacts",   value: activeContacts,               icon: Users,            color: "text-primary",     bg: "bg-primary/10",     action: () => router.push("/contacts") },
     { label: "Live Campaigns",    value: activeCampaigns,              icon: Mail,             color: "text-blue-600",    bg: "bg-blue-500/10",    action: () => router.push("/campaigns") },
     { label: "Pending Leads",     value: pendingLeads,                 icon: Target,           color: "text-amber-600",   bg: "bg-amber-500/10",   action: () => router.push("/forms") },

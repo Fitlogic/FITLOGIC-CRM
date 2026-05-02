@@ -12,16 +12,17 @@ interface ParsedEmail {
 }
 
 interface MailFormatterProps {
-  content: string;
+  content: string | null | undefined;
   patientName?: string;
   patientEmail?: string;
   createdAt?: string;
   className?: string;
 }
 
-function parseEmailContent(content: string): ParsedEmail {
+function parseEmailContent(content: string | null | undefined): ParsedEmail {
   // Handle content stored as "Subject: X\n\nBody"
-  const lines = content.split("\n");
+  const safeContent = content ?? "";
+  const lines = safeContent.split("\n");
   let subject = "";
   let bodyStartIndex = 0;
 
@@ -185,7 +186,7 @@ export function MailFormatter({
 }
 
 // Simple preview variant for list views
-export function MailPreview({ content, maxLength = 120 }: { content: string; maxLength?: number }) {
+export function MailPreview({ content, maxLength = 120 }: { content: string | null | undefined; maxLength?: number }) {
   const parsed = useMemo(() => parseEmailContent(content), [content]);
   const preview = parsed.body.slice(0, maxLength).trim();
   const hasMore = parsed.body.length > maxLength;

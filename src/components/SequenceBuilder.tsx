@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Plus, Trash2, ArrowDown, Clock, Mail, Eye, EyeOff, Sparkles, Loader2, Info, GripVertical } from "lucide-react";
+import { Plus, Trash2, Clock, Mail, Eye, EyeOff, Sparkles, Loader2, Info, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmailPreview } from "@/components/EmailPreview";
-import { RichEmailEditor } from "@/components/RichEmailEditor";
+import { RichEmailEditor, type EmailAttachment } from "@/components/RichEmailEditor";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 
@@ -20,6 +20,8 @@ export interface SequenceStep {
   subject: string;
   body_html: string;
   delay_days: number;
+  /** Per-step file attachments — round-tripped to campaign_sequences.attachments. */
+  attachments?: EmailAttachment[];
 }
 
 interface SequenceBuilderProps {
@@ -211,45 +213,64 @@ export function SequenceBuilder({ steps, onChange }: SequenceBuilderProps) {
 
           return (
             <div key={step.id}>
-              {idx > 0 && (
-                <div className="flex items-center gap-2 py-1.5 px-4">
-                  <ArrowDown className="h-3.5 w-3.5 text-muted-foreground" />
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Wait</span>
-                    <Select
-                      value={String(step.delay_days)}
-                      onValueChange={(v) => updateStep(step.id, { delay_days: parseInt(v) })}
-                    >
-                      <SelectTrigger className="h-7 w-28 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {RESEARCH_DELAY_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={String(opt.value)}>
-                            <div className="flex items-center gap-1.5">
-                              <span>{opt.label}</span>
-                              {opt.value === recommendedDelay && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 text-primary border-primary/30">
-                                  Recommended
-                                </Badge>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="h-3 w-3 text-muted-foreground cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-[200px] text-xs">
-                        {RESEARCH_DELAY_OPTIONS.find(o => o.value === step.delay_days)?.description || "Custom spacing"}
-                      </TooltipContent>
-                    </Tooltip>
+              {idx > 0 && (() => {
+                const isRecommended = step.delay_days === recommendedDelay;
+                const description = RESEARCH_DELAY_OPTIONS.find(o => o.value === step.delay_days)?.description ?? "Custom spacing";
+                return (
+                  <div className="relative flex items-stretch py-1 pl-7 pr-4 group">
+                    {/* Vertical connector spine */}
+                    <div className="absolute left-7 top-0 bottom-0 w-px bg-gradient-to-b from-primary/40 via-primary/20 to-primary/40" aria-hidden />
+                    {/* Tiny inline timer dot pinned to the spine */}
+                    <div className="absolute left-7 top-1/2 -translate-x-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-background border border-primary/40 flex items-center justify-center shadow-sm">
+                      <Clock className="h-2.5 w-2.5 text-primary" />
+                    </div>
+                    {/* Pill content */}
+                    <div className="ml-6 flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 shadow-sm hover:border-primary/40 transition-colors">
+                      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Wait</span>
+                      <Select
+                        value={String(step.delay_days)}
+                        onValueChange={(v) => updateStep(step.id, { delay_days: parseInt(v) })}
+                      >
+                        <SelectTrigger className="h-6 px-2 py-0 text-xs font-semibold border-0 bg-primary/10 text-primary hover:bg-primary/15 focus:ring-1 focus:ring-primary/30 gap-1 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:opacity-60">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent align="start">
+                          {RESEARCH_DELAY_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={String(opt.value)} className="text-xs">
+                              <div className="flex items-center gap-2 w-full">
+                                <span className="font-medium">{opt.label}</span>
+                                {opt.value === recommendedDelay && (
+                                  <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-primary">
+                                    ★ Recommended
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-muted-foreground hidden sm:inline">
+                                  {opt.description}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {isRecommended && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide text-primary px-1.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+                          ★ Best
+                        </span>
+                      )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-[10px] text-muted-foreground hidden md:inline truncate max-w-[200px] cursor-help border-l border-border/60 pl-2 ml-1">
+                            {description}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                          {description}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               <Card
                 draggable
@@ -315,6 +336,8 @@ export function SequenceBuilder({ steps, onChange }: SequenceBuilderProps) {
                             subject={step.subject}
                             placeholder="Write your email here. Use double Enter for new paragraphs. Click 'Insert Variable' to personalize."
                             minHeight={180}
+                            attachments={step.attachments ?? []}
+                            onAttachmentsChange={(next) => updateStep(step.id, { attachments: next })}
                           />
                         </div>
                       )}

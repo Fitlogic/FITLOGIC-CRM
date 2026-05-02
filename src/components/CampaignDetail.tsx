@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import {
   ArrowLeft, Pencil, Clock, Pause, Play, Send, Eye, Users,
   ChevronDown, ChevronUp, Mail, Layers, UserPlus, Calendar,
-  CalendarClock, Shield, X, MousePointerClick, Activity, RotateCcw, Zap, Save, MapPin
+  CalendarClock, Shield, X, MousePointerClick, Activity, RotateCcw, Zap, Save, MapPin,
+  FlaskConical, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,7 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { EmailPreview } from "@/components/EmailPreview";
-import { RichEmailEditor } from "@/components/RichEmailEditor";
+import { RichEmailEditor, type EmailAttachment } from "@/components/RichEmailEditor";
 import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
 import { CAMPAIGN_STATUS_CONFIG, type CampaignStatus } from "@/lib/types";
 import { CampaignActivityLog } from "@/components/CampaignActivityLog";
@@ -63,6 +65,7 @@ const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const cfg = CAMPAIGN_STATUS_CONFIG[campaign.status as CampaignStatus] || CAMPAIGN_STATUS_CONFIG.draft;
   const [expandedSequence, setExpandedSequence] = useState<string | null>(null);
   const [activeDetailTab, setActiveDetailTab] = useState("overview");
@@ -78,6 +81,7 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
     subject: string;
     previewText: string;
     bodyHtml: string;
+    attachments: EmailAttachment[];
     stepNumber?: number;
   } | null>(null);
 
@@ -102,6 +106,24 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
       if (error) throw error;
       return data;
     },
+  });
+
+  // Test-mode flag from practice_settings — drives the banner that warns the
+  // user "Send Now" will only deliver to flagged test contacts. Toggle in
+  // Settings → Campaign Defaults. Cast through unknown — auto-generated
+  // supabase types predate this column.
+  const { data: testModeOnly = true } = useQuery({
+    queryKey: ["practice_settings_test_mode"],
+    queryFn: async () => {
+      const res = await (supabase.from("practice_settings") as unknown as {
+        select: (cols: string) => { limit: (n: number) => { single: () => Promise<{ data: { test_mode_only?: boolean } | null }> } };
+      })
+        .select("test_mode_only")
+        .limit(1)
+        .single();
+      return res.data?.test_mode_only ?? true;
+    },
+    staleTime: 30_000,
   });
 
   const { data: sendLog = [] } = useQuery({
@@ -198,42 +220,180 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
         business_days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
       }).eq("id", campaign.id);
       if (error) throw error;
-      // Immediately trigger the queue so step 1 goes out now
-      try {
-        await fetch("/api/process-campaign-queue", { method: "POST" });
-      } catch {
-        // Non-fatal — cron will catch it within a minute
+
+      // Trigger the queue and inspect what actually happened. Previously this
+      // was fire-and-forget: a silent zero-send (test mode skipping every
+      // recipient, missing Resend key, etc.) looked like success in the UI.
+      const res = await fetch("/api/process-campaign-queue", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error ?? `Queue returned ${res.status}`);
       }
+      // Find this campaign's row in the response
+      const row = (data?.processed as Array<{ campaign_id?: string; sent?: number; failed?: number; skipped?: number; skip_reasons?: { test_mode?: number; suppressed?: number; unsubscribed?: number; no_sequence_step?: number; sequence_completed?: number; sequence_delay?: number }; first_error?: string | null; recipients_considered?: number }> | undefined)
+        ?.find(r => r.campaign_id === campaign.id);
+      return {
+        row,
+        testModeOnly: !!data?.test_mode_only,
+        providerConfigured: data?.provider_configured as { resend?: boolean; gmail?: boolean; from_address?: boolean } | undefined,
+      };
     },
-    onSuccess: () => {
+    onSuccess: ({ row, testModeOnly, providerConfigured }) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      refetchRecipients();
+
       const isSeq = campaign.campaign_type === "sequence";
+      const sent = row?.sent ?? 0;
+      const failed = row?.failed ?? 0;
+      const skipped = row?.skipped ?? 0;
+
+      // Provider misconfiguration — flag immediately and stop.
+      if (providerConfigured && !providerConfigured.resend && !providerConfigured.gmail) {
+        toast({
+          title: "No email provider configured",
+          description: "Add a Resend API key in Settings → Email or connect Gmail. Nothing was sent.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (providerConfigured && !providerConfigured.from_address) {
+        toast({
+          title: "Missing 'From' address",
+          description: "Set a sender email in Settings → Email. Nothing was sent.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (sent > 0) {
+        toast({
+          title: isSeq ? `Step 1 sent to ${sent} recipient${sent === 1 ? "" : "s"}` : `Sending to ${sent} recipient${sent === 1 ? "" : "s"}`,
+          description: skipped > 0 || failed > 0
+            ? `${skipped > 0 ? `${skipped} skipped` : ""}${skipped > 0 && failed > 0 ? ", " : ""}${failed > 0 ? `${failed} failed` : ""}.${isSeq ? " Remaining steps will follow the scheduled cadence." : ""}`
+            : isSeq ? "Remaining steps will follow the scheduled cadence." : "Emails are going out now.",
+        });
+        return;
+      }
+
+      // Zero sent — figure out why and tell the user.
+      const tm = row?.skip_reasons?.test_mode ?? 0;
+      const sup = row?.skip_reasons?.suppressed ?? 0;
+      const uns = row?.skip_reasons?.unsubscribed ?? 0;
+      const nss = row?.skip_reasons?.no_sequence_step ?? 0;
+      const sc = row?.skip_reasons?.sequence_completed ?? 0;
+      const sd = row?.skip_reasons?.sequence_delay ?? 0;
+
+      // Sequence config bug: recipient is at current_step=0 but the sequence
+      // has no step_number=1 row. The campaign was saved without any steps,
+      // or step numbering is off.
+      if (nss > 0) {
+        toast({
+          title: "Sequence has no step 1",
+          description: `${nss} recipient${nss === 1 ? "" : "s"} couldn't be sent because the sequence is empty. Edit the campaign and add at least one email step, then try Send Now again.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (testModeOnly && tm > 0) {
+        toast({
+          title: "Nothing sent — test mode is on",
+          description: `${tm} recipient${tm === 1 ? "" : "s"} skipped because they aren't flagged "Test Contact". Toggle ${tm === 1 ? "that contact" : "those contacts"} to is_test_contact=true, or turn off test mode in Settings.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (sc > 0 && sent === 0) {
+        toast({
+          title: "All recipients have completed the sequence",
+          description: `${sc} recipient${sc === 1 ? " has" : "s have"} already received every step. Add new recipients to send anything.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (sd > 0 && sent === 0) {
+        toast({
+          title: "Waiting on sequence delay",
+          description: `${sd} recipient${sd === 1 ? "" : "s"} are inside the wait window before their next step. They'll send automatically once the delay elapses.`,
+        });
+        return;
+      }
+      if (sup + uns > 0 && sent === 0 && failed === 0) {
+        toast({
+          title: "All recipients skipped",
+          description: `${sup} suppressed (bounced/complained), ${uns} unsubscribed. Add new recipients to send anything.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (failed > 0) {
+        toast({
+          title: `Send failed for ${failed} recipient${failed === 1 ? "" : "s"}`,
+          description: row?.first_error ?? "Check the recipient list for per-row errors.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!row || (row.recipients_considered ?? 0) === 0) {
+        toast({
+          title: "No pending recipients",
+          description: "This campaign has no recipients with status=pending. Add recipients first.",
+          variant: "destructive",
+        });
+        return;
+      }
       toast({
-        title: isSeq ? "Sequence started!" : "Campaign sending now!",
-        description: isSeq
-          ? "Email 1 sent now. Remaining emails will follow the scheduled cadence."
-          : "Emails will start going out shortly.",
+        title: "Nothing sent",
+        description: "The queue ran but produced no sends. Check the recipient list for skip reasons.",
+        variant: "destructive",
       });
     },
-    onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e) => toast({ title: "Send failed", description: e.message, variant: "destructive" }),
   });
 
   const saveEmailMut = useMutation({
     mutationFn: async () => {
       if (!editingEmail) return;
-      if (editingEmail.type === "template") {
-        const { error } = await supabase.from("email_templates").update({
-          subject: editingEmail.subject,
-          preview_text: editingEmail.previewText,
-          body_html: editingEmail.bodyHtml,
-        }).eq("id", editingEmail.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("campaign_sequences").update({
-          subject_override: editingEmail.subject,
-          body_html_override: editingEmail.bodyHtml,
-        }).eq("id", editingEmail.id);
-        if (error) throw error;
+      // Auto-generated supabase types predate the `attachments` JSONB column
+      // (added in migration 20260502000001). Cast through unknown so we can
+      // include the field in the update payload without typegen regeneration.
+      // Defensive write: try with attachments, fall back to legacy columns
+      // if the column doesn't exist yet (migration not applied). Otherwise
+      // the user's edit silently fails with "column does not exist".
+      const tryUpdate = async (table: "email_templates" | "campaign_sequences", withAttachments: boolean) => {
+        const base: Record<string, unknown> = editingEmail.type === "template"
+          ? {
+              subject: editingEmail.subject,
+              preview_text: editingEmail.previewText,
+              body_html: editingEmail.bodyHtml,
+            }
+          : {
+              subject_override: editingEmail.subject,
+              body_html_override: editingEmail.bodyHtml,
+            };
+        if (withAttachments) base.attachments = editingEmail.attachments;
+        return (supabase.from(table) as unknown as {
+          update: (vals: Record<string, unknown>) => { eq: (col: string, val: string) => Promise<{ error: { message: string; code?: string } | null }> };
+        })
+          .update(base)
+          .eq("id", editingEmail.id);
+      };
+
+      const table = editingEmail.type === "template" ? "email_templates" : "campaign_sequences";
+      const first = await tryUpdate(table, true);
+      if (first.error) {
+        // Most common cause: attachments column missing because migration
+        // hasn't been applied. Retry without it so the user's edit lands.
+        console.warn("[CampaignDetail] save with attachments failed; retrying without", {
+          table, error: first.error.message,
+        });
+        if ((editingEmail.attachments?.length ?? 0) > 0) {
+          throw new Error(`Cannot save attachments — DB migration not applied yet. Apply migration 20260502000001_email_attachments.sql, or remove attachments and try again. (${first.error.message})`);
+        }
+        const second = await tryUpdate(table, false);
+        if (second.error) throw new Error(second.error.message);
       }
     },
     onSuccess: () => {
@@ -243,6 +403,30 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
       toast({ title: "Email saved" });
     },
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Reset recipients that were silently marked "completed" by the queue
+  // because the sequence had no step 1. After the user fixes the sequence,
+  // they need a way to put those recipients back into the pending pool.
+  const resetStuckMut = useMutation({
+    mutationFn: async () => {
+      const stuck = recipients.filter(
+        (r) => r.status === "completed" && (r.last_error?.includes("Sequence has no step") ?? false),
+      );
+      if (stuck.length === 0) throw new Error("No stuck recipients to reset");
+      const ids = stuck.map((r) => r.id);
+      const { error } = await supabase
+        .from("campaign_recipients")
+        .update({ status: "pending", last_error: null, current_step: 0 })
+        .in("id", ids);
+      if (error) throw error;
+      return stuck.length;
+    },
+    onSuccess: (count) => {
+      refetchRecipients();
+      toast({ title: `Reset ${count} recipient${count === 1 ? "" : "s"} back to pending. Click Send Now to retry.` });
+    },
+    onError: (e) => toast({ title: "Reset failed", description: e.message, variant: "destructive" }),
   });
 
   const retryFailedMut = useMutation({
@@ -322,6 +506,20 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
   const pendingRecipients = recipients.filter(r => r.status === "pending");
   const totalDays = sequences.reduce((sum: number, s: any) => sum + (s.delay_days || 0), 0);
   const estimatedSendDays = maxSendsPerDay > 0 ? Math.ceil(recipients.length / maxSendsPerDay) : 0;
+  // Sequence campaigns NEED at least one row in campaign_sequences. Without
+  // that the queue silently completes every recipient — gate Send Now / Schedule
+  // on the row count to short-circuit that path.
+  const isUnsendable = campaign.campaign_type === "sequence" && sequences.length === 0;
+  // Recipients the queue silently completed because step 1 didn't exist.
+  // Used to surface a "reset and retry" CTA on the banner.
+  const stuckRecipients = recipients.filter(
+    (r) => r.status === "completed" && (r.last_error?.includes("Sequence has no step") ?? false),
+  );
+  const sendNowDisabledReason = isUnsendable
+    ? "Sequence has no email steps — edit the campaign and add at least one step."
+    : recipients.length === 0
+      ? "Add at least one recipient first."
+      : "";
 
   const toggleDay = (day: string) => {
     setBusinessDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
@@ -353,11 +551,14 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
               <Button variant="outline" size="sm" onClick={() => onEdit(campaign)}><Pencil className="h-3.5 w-3.5 mr-1" />Edit</Button>
               <Button variant="outline" size="sm"
                 onClick={() => sendNowMut.mutate()}
-                disabled={recipients.length === 0 || sendNowMut.isPending}>
+                disabled={!!sendNowDisabledReason || sendNowMut.isPending}
+                title={sendNowDisabledReason || undefined}>
                 <Zap className="h-3.5 w-3.5 mr-1" />{sendNowMut.isPending ? "Sending..." : "Send Now"}
               </Button>
               <Button size="sm" className="gradient-brand text-primary-foreground"
-                onClick={() => setShowSchedulePanel(true)} disabled={recipients.length === 0}>
+                onClick={() => setShowSchedulePanel(true)}
+                disabled={!!sendNowDisabledReason}
+                title={sendNowDisabledReason || undefined}>
                 <CalendarClock className="h-3.5 w-3.5 mr-1" />Schedule
               </Button>
             </>
@@ -378,7 +579,8 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
               </Button>
               <Button variant="outline" size="sm"
                 onClick={() => sendNowMut.mutate()}
-                disabled={sendNowMut.isPending}>
+                disabled={isUnsendable || sendNowMut.isPending}
+                title={isUnsendable ? "Sequence has no email steps — edit and add at least one step." : undefined}>
                 <Zap className="h-3.5 w-3.5 mr-1" />Send Now
               </Button>
             </>
@@ -399,6 +601,82 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
           )}
         </div>
       </div>
+
+      {/* Empty-sequence banner — a sequence campaign with zero rows in
+          campaign_sequences will silently mark every recipient as completed
+          without sending. Surface that hard so the user can fix it. */}
+      {campaign.campaign_type === "sequence" && sequences.length === 0 && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+          <div className="h-9 w-9 rounded-md bg-destructive/15 flex items-center justify-center shrink-0">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-destructive">This sequence has no email steps</p>
+            <p className="text-xs text-destructive/90 mt-1">
+              Send Now and the daily 8am Texas cron will silently mark every recipient as <code className="px-1 rounded bg-destructive/10 font-mono text-[11px]">completed</code> without sending anything.
+              Click <strong>Edit</strong> above and add at least one step (with subject + body), then save.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Recovery banner — recipients the queue silently completed because
+          step 1 was missing. After the user fixes the sequence, this lets
+          them flip those recipients back to pending in one click. */}
+      {!isUnsendable && stuckRecipients.length > 0 && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-4 flex items-start gap-3">
+          <div className="h-9 w-9 rounded-md bg-amber-500/15 flex items-center justify-center shrink-0">
+            <RotateCcw className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+              {stuckRecipients.length} recipient{stuckRecipients.length === 1 ? "" : "s"} stuck from a previous run
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-200/80 mt-1">
+              {stuckRecipients.length === 1 ? "This recipient was" : "These recipients were"} silently marked completed when the sequence was empty. Now that step 1 exists, reset {stuckRecipients.length === 1 ? "it" : "them"} to pending so Send Now can retry.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 border-amber-400/50 text-amber-900 dark:text-amber-200 hover:bg-amber-500/10"
+            onClick={() => resetStuckMut.mutate()}
+            disabled={resetStuckMut.isPending}
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+            {resetStuckMut.isPending ? "Resetting…" : "Reset to pending"}
+          </Button>
+        </div>
+      )}
+
+      {/* Test-mode banner — when practice_settings.test_mode_only is on, only
+          contacts flagged is_test_contact=true receive sends. Without this
+          banner, "Send Now" silently produces 0 emails because every other
+          recipient gets skipped server-side. */}
+      {testModeOnly && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-4 flex items-start gap-3">
+          <div className="h-9 w-9 rounded-md bg-amber-500/15 flex items-center justify-center shrink-0">
+            <FlaskConical className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Test mode is on
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-200/80 mt-1">
+              Only contacts flagged <code className="px-1 rounded bg-amber-500/15 font-mono text-[11px]">is_test_contact</code> receive sends. Anyone else in this campaign will be silently skipped on Send Now and the daily 8am Texas cron.
+              <button
+                type="button"
+                onClick={() => router.push("/settings?tab=campaigns")}
+                className="ml-1 font-semibold underline-offset-2 hover:underline"
+              >
+                Open Settings
+              </button>
+              {" to disable test mode, or flag your test contacts in the Contacts page."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Inline Schedule Panel */}
       {showSchedulePanel && (
@@ -545,6 +823,9 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                   type: "template", id: template.id,
                   subject: template.subject, previewText: template.preview_text || "",
                   bodyHtml: template.body_html || "",
+                  attachments: Array.isArray((template as unknown as { attachments?: EmailAttachment[] }).attachments)
+                    ? (template as unknown as { attachments: EmailAttachment[] }).attachments
+                    : [],
                 })}>
                   <Pencil className="h-3.5 w-3.5 mr-1" />Edit Email
                 </Button>
@@ -570,7 +851,15 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                       <span className="text-sm font-medium truncate flex-1">{s.subject_override || "No subject"}</span>
                       <Pencil
                         className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground shrink-0"
-                        onClick={(e) => { e.stopPropagation(); setEditingEmail({ type: "sequence", id: s.id, subject: s.subject_override || "", previewText: "", bodyHtml: s.body_html_override || "", stepNumber: s.step_number }); }}
+                        onClick={(e) => { e.stopPropagation(); setEditingEmail({
+                          type: "sequence", id: s.id,
+                          subject: s.subject_override || "", previewText: "",
+                          bodyHtml: s.body_html_override || "",
+                          attachments: Array.isArray((s as unknown as { attachments?: EmailAttachment[] }).attachments)
+                            ? (s as unknown as { attachments: EmailAttachment[] }).attachments
+                            : [],
+                          stepNumber: s.step_number,
+                        }); }}
                       />
                       {isOpen ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                     </button>
@@ -747,6 +1036,8 @@ export function CampaignDetail({ campaign, onBack, onEdit }: Props) {
                   previewText={editingEmail?.previewText}
                   placeholder="Write your email here. Use double Enter for paragraphs. Click 'Insert Variable' to personalize with contact data."
                   minHeight={280}
+                  attachments={editingEmail?.attachments ?? []}
+                  onAttachmentsChange={(next) => setEditingEmail(p => p ? { ...p, attachments: next } : p)}
                 />
               </div>
             </div>

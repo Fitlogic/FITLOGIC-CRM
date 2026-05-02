@@ -7,6 +7,7 @@ import type { Json } from "@/integrations/supabase/types";
 import { QK } from "@/lib/queryKeys";
 import type { SegmentRule } from "@/lib/campaign-data";
 import { matchesSegmentRules, resolveSegmentMembers, sanitizeSegmentRules } from "@/lib/segment-utils";
+import { fetchAllPatients, getPatientCount } from "@/lib/patient-queries";
 import {
   Mail, Plus, Send, Clock, FileText, Eye, Pencil, Users, BarChart3,
   Search, Trash2, Copy, MousePointerClick, Sparkles, Layers, X, Filter
@@ -32,7 +33,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useToast } from "@/hooks/use-toast";
 import { AICampaignCreator } from "@/components/AICampaignCreator";
 import { AISequenceWizard } from "@/components/AISequenceWizard";
-import { SequenceBuilder } from "@/components/SequenceBuilder";
+import { SequenceBuilder, type SequenceStep as BuilderSequenceStep } from "@/components/SequenceBuilder";
 import { CampaignRecipients, type Recipient } from "@/components/CampaignRecipients";
 import { CampaignScheduleSettings, type ScheduleConfig } from "@/components/CampaignScheduleSettings";
 import { CampaignDetail } from "@/components/CampaignDetail";
@@ -51,9 +52,9 @@ interface CampaignRow {
   business_days?: string[]; recipient_count?: number; sent_count?: number;
 }
 
-interface SequenceStep {
-  id: string; step_number: number; subject: string; body_html: string; delay_days: number;
-}
+// Re-export SequenceBuilder's type so attachments stay structurally compatible
+// (the builder uses EmailAttachment which includes the editor-side `id`).
+type SequenceStep = BuilderSequenceStep;
 
 interface TemplateRow {
   id: string; name: string; subject: string; preview_text: string | null;
@@ -188,19 +189,27 @@ const Campaigns_Page = () => {
     },
   });
 
-  // Load all patients for live count preview when segment builder is open
+  // Load all patients for live count preview when segment builder is open.
+  // Batched via .range() so the rule preview reflects every emailable contact,
+  // not just the first 1000 PostgREST returns by default.
   const { data: allPatientsForSeg = [] } = useQuery({
     queryKey: ["all-patients-seg"],
     enabled: showSegmentBuilder,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("patients")
-        .select("*")
-        .not("email", "is", null)
-        .order("first_name");
-      if (error) throw error;
-      return (data ?? []) as unknown as SegmentPatientRow[];
-    },
+    queryFn: () =>
+      fetchAllPatients<SegmentPatientRow>({
+        select: "*",
+        emailOnly: true,
+        orderBy: { column: "first_name", ascending: true },
+      }),
+    staleTime: 60_000,
+  });
+
+  // Authoritative emailable-contact count for the segment-builder header.
+  const { data: segmentBuilderTotal = 0 } = useQuery({
+    queryKey: ["all-patients-seg-count"],
+    enabled: showSegmentBuilder,
+    queryFn: () => getPatientCount({ emailOnly: true }),
+    staleTime: 60_000,
   });
 
   const getSegmentContactName = (patient: SegmentPatientRow) =>
@@ -351,9 +360,19 @@ const Campaigns_Page = () => {
           );
         }
 
-        // Sequences: always replace (content edits)
+        // Sequences: replace-then-insert. If sequenceSteps is empty here we
+        // would WIPE the existing rows with nothing to replace them — that
+        // was the silent data-loss bug behind "my sequence has no steps but
+        // I never deleted them". Refuse the save instead.
         if (campaignType === "sequence") {
-          await supabase.from("campaign_sequences").delete().eq("campaign_id", c.id);
+          if (sequenceSteps.length === 0) {
+            throw new Error(
+              "Cannot save a sequence with zero steps. Add at least one email step in the sequence builder, or switch the campaign type to 'Single email'.",
+            );
+          }
+          const { error: delErr } = await supabase
+            .from("campaign_sequences").delete().eq("campaign_id", c.id);
+          if (delErr) throw delErr;
         }
       } else {
         const { data: newCampaign, error } = await supabase.from("campaigns").insert({
@@ -373,16 +392,40 @@ const Campaigns_Page = () => {
         }
       }
 
-      // Save sequence steps
-      if (campaignType === "sequence" && sequenceSteps.length > 0) {
-        const { error: seqErr } = await supabase.from("campaign_sequences").insert(
-          sequenceSteps.map(s => ({
-            campaign_id: campaignId, step_number: s.step_number,
-            delay_days: s.delay_days, subject_override: s.subject,
-            body_html_override: s.body_html,
-          }))
-        );
-        if (seqErr) throw seqErr;
+      // Save sequence steps. Force step_number to be the array index + 1 so
+      // step numbering is always contiguous starting at 1 — the queue's
+      // `sequences.find(s => s.step_number === currentStep + 1)` lookup is
+      // strict and silently completes the recipient if step 1 is missing.
+      if (campaignType === "sequence") {
+        if (sequenceSteps.length === 0) {
+          throw new Error("Cannot create a sequence campaign with zero steps. Add at least one email step.");
+        }
+        const tableAny = supabase.from("campaign_sequences") as unknown as {
+          insert: (rows: Record<string, unknown>[]) => Promise<{ error: { message: string; code?: string } | null }>;
+        };
+        const baseRows = sequenceSteps.map((s, idx) => ({
+          campaign_id: campaignId,
+          step_number: idx + 1,
+          delay_days: s.delay_days,
+          subject_override: s.subject,
+          body_html_override: s.body_html,
+        }));
+        const withAttachments = sequenceSteps.map((s, idx) => ({
+          ...baseRows[idx],
+          attachments: s.attachments ?? [],
+        }));
+        // Try with attachments first; fall back to legacy columns if the
+        // attachments column hasn't been added to the live DB yet.
+        let res = await tableAny.insert(withAttachments);
+        if (res.error) {
+          const hasAttachments = sequenceSteps.some((s) => (s.attachments?.length ?? 0) > 0);
+          if (hasAttachments) {
+            throw new Error(`Cannot save attachments — DB migration not applied yet. Apply migration 20260502000001_email_attachments.sql, or remove attachments and try again. (${res.error.message})`);
+          }
+          console.warn("[Campaigns.save] sequence INSERT with attachments failed; retrying without", { error: res.error.message });
+          res = await tableAny.insert(baseRows);
+          if (res.error) throw new Error(res.error.message);
+        }
       }
     },
     onSuccess: () => {
@@ -443,7 +486,11 @@ const Campaigns_Page = () => {
     // Load existing sequences
     if (c.campaign_type === "sequence") {
       const { data: seqs } = await supabase.from("campaign_sequences").select("*").eq("campaign_id", c.id).order("step_number");
-      if (seqs) setSequenceSteps(seqs.map((s: any) => ({ id: s.id, step_number: s.step_number, subject: s.subject_override || "", body_html: s.body_html_override || "", delay_days: s.delay_days })));
+      if (seqs) setSequenceSteps(seqs.map((s: any) => ({
+        id: s.id, step_number: s.step_number, subject: s.subject_override || "",
+        body_html: s.body_html_override || "", delay_days: s.delay_days,
+        attachments: Array.isArray(s.attachments) ? s.attachments : [],
+      })));
     }
     setShowBuilder(true);
     setSelectedCampaign(null);
@@ -490,9 +537,29 @@ const Campaigns_Page = () => {
         .from("campaign_sequences").select("step_number, delay_days, subject_override, body_html_override, template_id")
         .eq("campaign_id", campaign.id).order("step_number");
       if (existingSeqs?.length) {
-        await supabase.from("campaign_sequences").insert(
-          existingSeqs.map(s => ({ ...s, campaign_id: newCampaign.id }))
+        // Re-number contiguously from 1 in case the source campaign has gaps
+        // (legacy data, manual deletes, etc.) — the queue's lookup demands
+        // step_number=1 for the first send.
+        const { error: copyErr } = await supabase.from("campaign_sequences").insert(
+          existingSeqs.map((s, idx) => ({ ...s, campaign_id: newCampaign.id, step_number: idx + 1 }))
         );
+        if (copyErr) {
+          toast({
+            title: "Sequence steps failed to copy",
+            description: `${copyErr.message}. The duplicate was created but has no email steps.`,
+            variant: "destructive",
+          });
+          invalidateAll(newCampaign.id);
+          return;
+        }
+      } else {
+        // Source had a sequence campaign type but no steps — don't quietly
+        // create an unsendable copy.
+        toast({
+          title: "Source sequence is empty",
+          description: "The original campaign has no email steps. Add steps to the original first, then duplicate.",
+          variant: "destructive",
+        });
       }
     }
 
@@ -518,19 +585,41 @@ const Campaigns_Page = () => {
     const matchSeg = segments.find(s => s.name.toLowerCase().includes(result.suggestedSegment.toLowerCase()));
 
     if (isSequence) {
+      if (!Array.isArray(result.emails) || result.emails.length === 0) {
+        toast({ title: "AI returned no email steps", description: "Try generating again.", variant: "destructive" });
+        return;
+      }
       // Create campaign
       const { data: newCampaign, error } = await supabase.from("campaigns").insert({
         name: result.campaignName, status: "draft", campaign_type: "sequence",
         segment_id: matchSeg?.id || segments[0]?.id || null,
       }).select().single();
-      if (error || !newCampaign) return;
-      // Insert sequence steps
-      await supabase.from("campaign_sequences").insert(
-        result.emails.map((e: any) => ({
-          campaign_id: newCampaign.id, step_number: e.step,
-          delay_days: e.delayDays, subject_override: e.subject, body_html_override: e.bodyHtml,
+      if (error || !newCampaign) {
+        toast({ title: "Failed to create campaign", description: error?.message ?? "Unknown error", variant: "destructive" });
+        return;
+      }
+      // Insert sequence steps. Force step_number to array index + 1 — the LLM
+      // sometimes returns 0-indexed steps which then never match the queue's
+      // `step_number === currentStep + 1` lookup and the recipient gets
+      // silently marked completed without ever sending.
+      const { error: seqErr } = await supabase.from("campaign_sequences").insert(
+        (result.emails as any[]).map((e: any, idx: number) => ({
+          campaign_id: newCampaign.id,
+          step_number: idx + 1,
+          delay_days: idx === 0 ? 0 : (e.delayDays ?? 3),
+          subject_override: e.subject,
+          body_html_override: e.bodyHtml,
         }))
       );
+      if (seqErr) {
+        toast({
+          title: "Sequence steps failed to save",
+          description: `${seqErr.message}. The campaign was created but has no email steps. Open it in the builder and add steps.`,
+          variant: "destructive",
+        });
+        invalidateAll();
+        return;
+      }
     } else {
       // Single email — create template + campaign
       const email = result.emails[0];
@@ -859,6 +948,11 @@ const Campaigns_Page = () => {
               <div>
                 <span className="text-xs text-muted-foreground">Matching contacts</span>
                 <p className="text-[11px] text-muted-foreground mt-1">{previewSummary}</p>
+                {segmentBuilderTotal > 0 && allPatientsForSeg.length < segmentBuilderTotal && (
+                  <p className="text-[10px] text-amber-600 mt-1">
+                    Loading contacts… ({allPatientsForSeg.length.toLocaleString()} of {segmentBuilderTotal.toLocaleString()})
+                  </p>
+                )}
               </div>
               <span className="text-lg font-bold font-heading text-foreground">{showSegmentBuilder ? previewCount : "—"}</span>
             </div>

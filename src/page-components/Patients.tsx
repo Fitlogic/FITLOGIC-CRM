@@ -40,7 +40,7 @@ import { Label } from "@/components/ui/label";
 import { PatientForm, type PatientFormData } from "@/components/PatientForm";
 import { PatientTimeline } from "@/components/PatientTimeline";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
-import { RichEmailEditor } from "@/components/RichEmailEditor";
+import { RichEmailEditor, type EmailAttachment } from "@/components/RichEmailEditor";
 
 type Patient = {
   id: string;
@@ -328,6 +328,7 @@ export default function Patients() {
   const [composeSubject, setComposeSubject] = useState("");
   const [composeHtml, setComposeHtml] = useState("");
   const [composeText, setComposeText] = useState("");
+  const [composeAttachments, setComposeAttachments] = useState<EmailAttachment[]>([]);
   const [sendingEmail, setSendingEmail] = useState(false);
 
   // Persist filters to sessionStorage
@@ -1714,6 +1715,8 @@ export default function Patients() {
               placeholder="Write your message..."
               minHeight={250}
               subject={composeSubject}
+              attachments={composeAttachments}
+              onAttachmentsChange={setComposeAttachments}
             />
           </div>
         </div>
@@ -1735,6 +1738,11 @@ export default function Patients() {
                     toName: `${composePatient.first_name} ${composePatient.last_name}`,
                     subject: composeSubject,
                     html: composeHtml,
+                    attachments: composeAttachments.map((a) => ({
+                      filename: a.filename,
+                      content: a.content,
+                      mimeType: a.mimeType,
+                    })),
                     variables: {
                       first_name: composePatient.first_name,
                       last_name: composePatient.last_name,
@@ -1763,6 +1771,7 @@ export default function Patients() {
                 setComposeHtml("");
                 setComposeText("");
                 setComposeSubject("");
+                setComposeAttachments([]);
               } catch (e: unknown) {
                 toast({
                   title: "Failed to send",

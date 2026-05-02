@@ -8,6 +8,13 @@
  *  - app/api/send-email/route.ts               (one-off compose from UI)
  */
 
+export interface EmailAttachment {
+  filename: string;
+  /** Base64-encoded file content (no data: URL prefix). */
+  content: string;
+  mimeType: string;
+}
+
 export interface EmailPayload {
   to: string;
   toName?: string | null;
@@ -19,6 +26,8 @@ export interface EmailPayload {
   listUnsubscribeUrl?: string;
   /** Tracking ID surfaced on Resend X-Tracking-ID header. */
   trackingId?: string;
+  /** Optional file attachments. Forwarded to both Resend and Gmail. */
+  attachments?: EmailAttachment[];
 }
 
 export interface SendResult {
@@ -55,6 +64,15 @@ async function sendViaResend(apiKey: string, payload: EmailPayload): Promise<Sen
         subject: payload.subject,
         html: payload.html,
         ...(Object.keys(headers).length ? { headers } : {}),
+        ...(payload.attachments?.length
+          ? {
+              attachments: payload.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                content_type: a.mimeType,
+              })),
+            }
+          : {}),
       }),
     });
     if (res.ok) {
@@ -77,6 +95,7 @@ async function sendViaGmail(payload: EmailPayload, baseUrl: string): Promise<Sen
         toName: payload.toName,
         subject: payload.subject,
         html: payload.html,
+        attachments: payload.attachments,
       }),
     });
     if (res.ok) {

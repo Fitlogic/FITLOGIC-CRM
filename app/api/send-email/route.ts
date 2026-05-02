@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
 
+interface SendEmailAttachment {
+  filename: string;
+  /** Base64-encoded content, no data: URL prefix. */
+  content: string;
+  mimeType: string;
+}
+
 interface SendEmailRequest {
   to: string;
   toName?: string | null;
@@ -9,6 +16,7 @@ interface SendEmailRequest {
   html: string;
   /** Replaces {{key}} tokens in subject/html before sending. */
   variables?: Record<string, string | number | null | undefined>;
+  attachments?: SendEmailAttachment[];
 }
 
 function replaceVariables(
@@ -32,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json()) as SendEmailRequest;
-    const { to, toName, subject, html, variables } = body;
+    const { to, toName, subject, html, variables, attachments } = body;
 
     if (!to || !subject || !html) {
       return NextResponse.json(
@@ -78,6 +86,7 @@ export async function POST(req: NextRequest) {
         subject: processedSubject,
         html: wrappedHtml,
         from: fromHeader || undefined,
+        attachments: attachments?.length ? attachments : undefined,
       },
       baseUrl,
       hasGmail,

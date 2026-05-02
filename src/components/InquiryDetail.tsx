@@ -11,7 +11,7 @@ import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { MailFormatter } from "@/components/MailFormatter";
-import { RichEmailEditor } from "@/components/RichEmailEditor";
+import { RichEmailEditor, type EmailAttachment } from "@/components/RichEmailEditor";
 import type { InquiryRow } from "@/components/InquiryList";
 import type { InquiryCategory, InquiryStatus } from "@/lib/types";
 
@@ -37,6 +37,7 @@ interface Props {
 export function InquiryDetail({ inquiry, onUpdate }: Props) {
   const [reply, setReply] = useState("");
   const [replyHtml, setReplyHtml] = useState("");
+  const [replyAttachments, setReplyAttachments] = useState<EmailAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [escalationStaffId, setEscalationStaffId] = useState<string | null>(null);
@@ -139,7 +140,16 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
       const res = await fetch("/api/send-inquiry-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inquiry_id: inquiry.id, reply_text: reply, html_content: replyHtml }),
+        body: JSON.stringify({
+          inquiry_id: inquiry.id,
+          reply_text: reply,
+          html_content: replyHtml,
+          attachments: replyAttachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+            mimeType: a.mimeType,
+          })),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Send failed");
@@ -152,6 +162,7 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
       toast.success("Reply sent & inquiry resolved");
       setReply("");
       setReplyHtml("");
+      setReplyAttachments([]);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to send reply");
     } finally {
@@ -267,6 +278,8 @@ export function InquiryDetail({ inquiry, onUpdate }: Props) {
                 placeholder="Write a reply..."
                 minHeight={150}
                 subject={`Re: ${inquiry.patient_name}`}
+                attachments={replyAttachments}
+                onAttachmentsChange={setReplyAttachments}
               />
               <div className="flex justify-end">
                 <Button
