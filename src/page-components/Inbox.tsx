@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { QK } from "@/lib/queryKeys";
@@ -29,6 +29,7 @@ const Inbox = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [inboxTab, setInboxTab] = useState<"all" | "contacts" | "unknown">("all");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
   const handleGmailSync = async () => {
     setSyncing(true);
@@ -86,12 +87,22 @@ const Inbox = () => {
     onError: () => toast.error("Failed to update category"),
   });
 
-  // Tab filter
-  const tabFiltered = inquiries.filter((i) => {
-    if (inboxTab === "contacts") return !!i.patient_id;
-    if (inboxTab === "unknown") return !i.patient_id;
-    return true;
-  });
+  // Tab filter + client-side sort. The supabase query already orders newest
+  // first (line 68); we re-sort here so toggling between Newest/Oldest is
+  // instant (no refetch).
+  const tabFiltered = useMemo(() => {
+    const filtered = inquiries.filter((i) => {
+      if (inboxTab === "contacts") return !!i.patient_id;
+      if (inboxTab === "unknown") return !i.patient_id;
+      return true;
+    });
+    const dir = sortOrder === "newest" ? -1 : 1;
+    return [...filtered].sort((a, b) => {
+      const at = new Date(a.created_at).getTime();
+      const bt = new Date(b.created_at).getTime();
+      return (at - bt) * dir;
+    });
+  }, [inquiries, inboxTab, sortOrder]);
 
   useEffect(() => {
     if (!tabFiltered.length) { setSelectedId(null); return; }
@@ -151,27 +162,42 @@ const Inbox = () => {
         ))}
       </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 bg-card border rounded-lg p-0.5 w-fit shadow-card">
-        {([
-          { key: "all",      label: "All Emails",       icon: InboxIcon, count: inquiries.length },
-          { key: "contacts", label: "From Contacts",    icon: Users,     count: contactCount },
-          { key: "unknown",  label: "Unknown Senders",  icon: UserX,     count: unknownCount },
-        ] as const).map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setInboxTab(t.key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              inboxTab === t.key
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-            <span className="ml-0.5 opacity-70">{t.count}</span>
-          </button>
-        ))}
+      {/* Tab bar + sort */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1 bg-card border rounded-lg p-0.5 w-fit shadow-card">
+          {([
+            { key: "all",      label: "All Emails",       icon: InboxIcon, count: inquiries.length },
+            { key: "contacts", label: "From Contacts",    icon: Users,     count: contactCount },
+            { key: "unknown",  label: "Unknown Senders",  icon: UserX,     count: unknownCount },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setInboxTab(t.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                inboxTab === t.key
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <t.icon className="h-3.5 w-3.5" />
+              {t.label}
+              <span className="ml-0.5 opacity-70">{t.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Sort:</span>
+          <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as "newest" | "oldest")}>
+            <SelectTrigger className="h-8 w-[140px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem value="newest" className="text-xs">Newest first</SelectItem>
+              <SelectItem value="oldest" className="text-xs">Oldest first</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Split panel */}

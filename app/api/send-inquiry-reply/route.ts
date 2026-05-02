@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
 import { applyEmailVars } from "@/lib/email-vars";
+import { syncContactOnEmailSent } from "@/lib/contact-sync";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     const { data: inquiry, error: iqErr } = await sb
       .from("inquiries")
-      .select("id, patient_name, patient_email, raw_content")
+      .select("id, patient_name, patient_email, raw_content, patient_id")
       .eq("id", inquiry_id)
       .single();
     if (iqErr || !inquiry) return NextResponse.json({ error: "Inquiry not found" }, { status: 404 });
@@ -77,6 +78,21 @@ export async function POST(req: NextRequest) {
         resolved_at: new Date().toISOString(),
       })
       .eq("id", inquiry_id);
+
+    // Sync the contact's pipeline state — same rule as the campaign queue.
+    // Inquiries store patient_id when the sender matched a contact in our DB.
+    const inquiryPatientId = (inquiry as { patient_id?: string | null }).patient_id;
+    if (inquiryPatientId) {
+      const { data: patientRow } = await (sb.from("patients") as unknown as {
+        select: (cols: string) => { eq: (c: string, v: string) => { maybeSingle: () => Promise<{ data: { id: string; status: string | null; pipeline_stage: string | null } | null }> } };
+      })
+        .select("id, status, pipeline_stage")
+        .eq("id", inquiryPatientId)
+        .maybeSingle();
+      if (patientRow) {
+        await syncContactOnEmailSent(sb, patientRow, new Date().toISOString());
+      }
+    }
 
     return NextResponse.json({ success: true, provider: result.provider });
   } catch (err) {

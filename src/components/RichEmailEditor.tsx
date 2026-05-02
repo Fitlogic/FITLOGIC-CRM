@@ -156,9 +156,18 @@ export function RichEmailEditor({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Initialize editor content when switching to visual mode
+  // Initialize editor content when (re-)entering visual mode. The previous
+  // implementation guarded with a `hasInitialized` ref that was never reset,
+  // so switching to Preview/HTML and back unmounted the contentEditable div
+  // and the freshly-mounted replacement was left blank — the user's typing
+  // appeared to vanish. We now reset the guard whenever we leave visual mode
+  // so a remount triggers the init again.
   useEffect(() => {
-    if (editorRef.current && mode === "visual" && !hasInitialized.current && mounted) {
+    if (mode !== "visual") {
+      hasInitialized.current = false;
+      return;
+    }
+    if (editorRef.current && !hasInitialized.current && mounted) {
       editorRef.current.innerHTML = value || `<p>${placeholder}</p>`;
       hasInitialized.current = true;
     }

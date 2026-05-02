@@ -115,5 +115,3 @@ POST https://your-domain.com/api/email-webhook
 Enable the following events: `email.bounced`, `email.complained`
 
 Opens and clicks are tracked internally via pixel and link rewriting — no Resend webhook needed for those.
-
-## Contribution

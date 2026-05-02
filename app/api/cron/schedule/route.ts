@@ -5,6 +5,7 @@ import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
 import { applyEmailVars, buildPatientVars } from "@/lib/email-vars";
 import { tryClaimCampaignLock, releaseCampaignLock } from "@/lib/campaign-lock";
 import { signUnsubToken } from "@/lib/unsub-token";
+import { syncContactOnEmailSent } from "@/lib/contact-sync";
 
 async function updateCampaignStats(supabase: SupabaseClient, campaignId: string) {
   const { data } = await supabase.from("campaign_send_log").select("status, opened_at, clicked_at").eq("campaign_id", campaignId);
@@ -257,6 +258,8 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
       first_name: string | null;
       last_name: string | null;
       company: string | null;
+      status: string | null;
+      pipeline_stage: string | null;
       is_test_contact?: boolean | null;
     };
     const patientById = new Map<string, PatientFields>();
@@ -276,7 +279,7 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
               in: (col: string, ids: string[]) => Promise<{ data: PatientFields[] | null; error: { message: string } | null }>;
             };
           })
-          .select("id, first_name, last_name, company, is_test_contact")
+          .select("id, first_name, last_name, company, status, pipeline_stage, is_test_contact")
           .in("id", patientIds);
         if (patientsRes.error) {
           console.error("[cron/schedule] patient batch fetch failed", { error: patientsRes.error.message });
@@ -444,15 +447,15 @@ async function processCampaigns(supabase: SupabaseClient, baseUrl: string) {
         const recipientUpdate: Record<string, unknown> = { status: isSequence ? "pending" : "sent", sent_at: now.toISOString() };
         if (isSequence) { recipientUpdate.current_step = stepNumber; if (stepNumber >= sequences.length) recipientUpdate.status = "completed"; }
         await supabase.from("campaign_recipients").update(recipientUpdate).eq("id", recipient.id);
-        // A1.4: stamp the patient's last_contacted_at so the daily list can
-        // sort by it. Cast through unknown — auto-generated supabase types
-        // predate this column.
+        // Stamp last_contacted_at AND auto-promote pipeline_stage from
+        // new_lead → contacted when the contact is still a "lead". The
+        // helper inspects the prefetched patient row so this is a single
+        // UPDATE with no extra read.
         if (recipient.patient_id) {
-          await (supabase.from("patients") as unknown as {
-            update: (vals: Record<string, unknown>) => { eq: (col: string, val: string) => Promise<unknown> };
-          })
-            .update({ last_contacted_at: now.toISOString() })
-            .eq("id", recipient.patient_id);
+          const p = patientById.get(recipient.patient_id);
+          if (p) {
+            await syncContactOnEmailSent(supabase, p, now.toISOString());
+          }
         }
         sentCount++;
       } else {
