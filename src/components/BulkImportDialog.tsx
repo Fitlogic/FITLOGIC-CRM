@@ -383,6 +383,14 @@ export function BulkImportDialog({ open, onOpenChange }: Props) {
             payload.last_name = typeof payload.last_name === "string" ? payload.last_name.trim() : "";
           }
 
+          // Default lead_source to 'other' when the row has no explicit
+          // source. Matches the existing LEAD_SOURCE_MAP key in Patients.tsx
+          // so the badge + filter dropdown render consistently. Without this
+          // default, sourceless rows show as "—" in the table and don't
+          // appear under any source filter.
+          const incomingSource = typeof payload.lead_source === "string" ? payload.lead_source.trim() : "";
+          payload.lead_source = incomingSource || "other";
+
           return { ...record, payload };
         });
 

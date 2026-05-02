@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { serverClient } from "@/lib/supabase";
 import { sendEmail, wrapEmailHtml, sanitizeEmailHtml } from "@/lib/emailSender";
 import { applyEmailVars } from "@/lib/email-vars";
+import { syncContactOnEmailSent } from "@/lib/contact-sync";
 
 interface SendEmailAttachment {
   filename: string;
@@ -18,6 +19,10 @@ interface SendEmailRequest {
   /** Replaces {{key}} tokens in subject/html before sending. */
   variables?: Record<string, string | number | null | undefined>;
   attachments?: SendEmailAttachment[];
+  /** Optional — when present, the patient gets last_contacted_at stamped
+   *  and (if status='lead' + pipeline_stage='new_lead') promoted to
+   *  pipeline_stage='contacted'. Pass from compose dialogs. */
+  patient_id?: string;
 }
 
 // Variable substitution moved to @/lib/email-vars (applyEmailVars) — accepts
@@ -34,7 +39,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json()) as SendEmailRequest;
-    const { to, toName, subject, html, variables, attachments } = body;
+    const { to, toName, subject, html, variables, attachments, patient_id } = body;
 
     if (!to || !subject || !html) {
       return NextResponse.json(
@@ -91,6 +96,20 @@ export async function POST(req: NextRequest) {
         { error: result.error ?? "Send failed" },
         { status: 502 },
       );
+    }
+
+    // Sync the contact's pipeline state. Best-effort — sync errors are
+    // logged inside the helper and never block the success response.
+    if (patient_id) {
+      const { data: patientRow } = await (sb.from("patients") as unknown as {
+        select: (cols: string) => { eq: (c: string, v: string) => { maybeSingle: () => Promise<{ data: { id: string; status: string | null; pipeline_stage: string | null } | null }> } };
+      })
+        .select("id, status, pipeline_stage")
+        .eq("id", patient_id)
+        .maybeSingle();
+      if (patientRow) {
+        await syncContactOnEmailSent(sb, patientRow, new Date().toISOString());
+      }
     }
 
     return NextResponse.json({

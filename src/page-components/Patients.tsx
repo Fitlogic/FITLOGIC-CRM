@@ -104,7 +104,8 @@ const STATUS_MAP: Record<string, { label: string; color: string; dot: string }> 
   lead:        { label: "Lead",        color: "bg-blue-50 text-blue-700 border-blue-200",       dot: "bg-blue-500" },
   client:      { label: "Client",      color: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
   active:      { label: "Active",      color: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
-  inactive:    { label: "Cold",        color: "bg-amber-50 text-amber-700 border-amber-200",    dot: "bg-amber-500" },
+  cold:        { label: "Cold",        color: "bg-slate-100 text-slate-700 border-slate-200",   dot: "bg-slate-500" },
+  inactive:    { label: "Inactive",    color: "bg-amber-50 text-amber-700 border-amber-200",    dot: "bg-amber-500" },
   archived:    { label: "Closed",      color: "bg-muted text-muted-foreground border-border",   dot: "bg-muted-foreground" },
   // Pipeline stage values (stored in status column)
   new_lead:    { label: "New Lead",    color: "bg-slate-100 text-slate-700 border-slate-200",   dot: "bg-slate-400" },
@@ -290,12 +291,18 @@ function MailThread({ inq, contactName }: { inq: any; contactName: string }) {
   );
 }
 
-// Maps contact status tab keys to the DB status values they cover
+// Maps contact status tab keys → DB `status` values. Each tab is now a
+// pure status filter (was previously mixing pipeline_stage values into the
+// status filter, which conflated the two columns):
+//   - In Progress = lead    (prospect we're actively working)
+//   - Active      = active  (won deal, paying client — set by the
+//     pipeline_stage='won' DB trigger from migration 20260502000003)
+//   - Cold        = cold    (lost deal — set by the pipeline_stage='lost'
+//     DB trigger from migration 20260502000004)
 const STATUS_TAB_MAP: Record<string, string[]> = {
-  leads:       ["new_lead", "lead"],
-  in_progress: ["contacted", "qualified", "proposal", "negotiation"],
-  active:      ["won"],
-  cold:        ["lost", "inactive"],
+  in_progress: ["lead"],
+  active:      ["active"],
+  cold:        ["cold", "inactive"], // legacy `inactive` rows still surface here
 };
 
 export default function Patients() {
@@ -482,7 +489,11 @@ export default function Patients() {
       city: form.city || null,
       state: form.state || null,
       zip_code: form.zip_code || null,
-      status: form.status || "active",
+      // New contacts default to "lead" — they get auto-promoted to "active"
+      // when their deal hits the "won" pipeline stage. See migration
+      // 20260502000003 for the DB trigger that does the promotion, and
+      // src/lib/contact-sync.ts for the email-send → contacted sync.
+      status: form.status || "lead",
       pipeline_stage: form.pipeline_stage || "new_lead",
       is_test_contact: !!form.is_test_contact,
       tags: parseTags(form.tags),
@@ -672,11 +683,24 @@ export default function Patients() {
 
   // Distinct state values present in the loaded contacts — fuels the
   // state-filter dropdown so Megan can scope a campaign to (e.g.) Texas.
+  // Defensively filters out anything that looks like a zip code (5 digits,
+  // optionally with a 4-digit suffix) because CSV imports occasionally land
+  // a zip in the state column. We also drop anything that's purely numeric
+  // or weirdly long so the dropdown stays scannable when the source data is
+  // dirty.
+  const isLikelyState = (raw: string): boolean => {
+    const v = raw.trim();
+    if (!v) return false;
+    if (/^\d{5}(-\d{4})?$/.test(v)) return false; // US zip
+    if (/^\d+$/.test(v)) return false;            // any pure digits
+    if (v.length > 30) return false;              // unreasonably long
+    return true;
+  };
   const stateOptions = useMemo(() => {
     const seen = new Set<string>();
     for (const p of allPatients) {
       const s = (p.state ?? "").trim();
-      if (s) seen.add(s);
+      if (s && isLikelyState(s)) seen.add(s);
     }
     return Array.from(seen).sort();
   }, [allPatients]);
@@ -1738,6 +1762,9 @@ export default function Patients() {
                     toName: `${composePatient.first_name} ${composePatient.last_name}`,
                     subject: composeSubject,
                     html: composeHtml,
+                    // Drives the post-send sync: pipeline_stage advances from
+                    // new_lead → contacted when status === "lead".
+                    patient_id: composePatient.id,
                     attachments: composeAttachments.map((a) => ({
                       filename: a.filename,
                       content: a.content,

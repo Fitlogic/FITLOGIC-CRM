@@ -295,8 +295,14 @@ export function PatientForm({ defaultValues, onSubmit, onCancel, isSubmitting }:
             <Select value={status} onValueChange={(v) => setValue("status", v)}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="active">Active Lead</SelectItem>
-                <SelectItem value="inactive">Cold</SelectItem>
+                {/* Status auto-syncs with pipeline_stage via DB triggers:
+                    - Outbound email to a "lead" → pipeline jumps to "contacted".
+                    - pipeline_stage='won'  → status='active'
+                    - pipeline_stage='lost' → status='cold' */}
+                <SelectItem value="lead">Lead</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="cold">Cold</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
                 <SelectItem value="archived">Closed</SelectItem>
               </SelectContent>
             </Select>
