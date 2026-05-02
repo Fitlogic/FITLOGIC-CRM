@@ -145,7 +145,14 @@ Respond in JSON format:
       }
     }
 
-    const { error: updateErr } = await sb.from("inquiries").update(updates).eq("id", inquiry_id);
+    // Cast through unknown — the auto-generated supabase types reject our
+    // dynamic `updates: Record<string, unknown>` shape even though every
+    // value lines up with the inquiries schema at runtime.
+    const { error: updateErr } = await (sb.from("inquiries") as unknown as {
+      update: (vals: Record<string, unknown>) => { eq: (col: string, val: string) => Promise<{ error: { message: string } | null }> };
+    })
+      .update(updates)
+      .eq("id", inquiry_id);
     if (updateErr) throw updateErr;
 
     return NextResponse.json({ success: true, classification: result, updates, emailSent, emailError });
