@@ -961,7 +961,9 @@ const Settings = () => {
         .then((r) => r.json())
         .then((data) => {
           if (!data?.success && data?.error) {
-            toast.error(`Google connection failed: ${data.error}`);
+            console.error("Google OAuth callback error:", data);
+            const detailMsg = typeof data.detail === "string" ? data.detail : data.detail ? JSON.stringify(data.detail) : "";
+            toast.error(`Google connection failed: ${data.error}${detailMsg ? ` — ${detailMsg}` : ""}`);
           } else if (data?.success) {
             const connected = data.connected as { calendar?: boolean; gmail?: boolean };
             const services = [
