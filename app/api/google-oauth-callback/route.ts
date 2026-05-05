@@ -25,8 +25,21 @@ export async function POST(req: NextRequest) {
     });
 
     if (!tokenRes.ok) {
-      const err = await tokenRes.text();
-      return NextResponse.json({ error: "Token exchange failed", detail: err }, { status: 400 });
+      const errText = await tokenRes.text();
+      let parsed: unknown = errText;
+      try { parsed = JSON.parse(errText); } catch {}
+      console.error("[google-oauth-callback] Token exchange failed", {
+        status: tokenRes.status,
+        detail: parsed,
+        redirect_uri,
+        client_id_prefix: clientId.slice(0, 12),
+      });
+      const detail = (parsed && typeof parsed === "object" && "error_description" in (parsed as any))
+        ? (parsed as any).error_description
+        : (parsed && typeof parsed === "object" && "error" in (parsed as any))
+          ? (parsed as any).error
+          : errText;
+      return NextResponse.json({ error: "Token exchange failed", detail }, { status: 400 });
     }
 
     const tokens = await tokenRes.json() as {
