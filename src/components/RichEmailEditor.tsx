@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Toggle } from "@/components/ui/toggle";
 import { Separator } from "@/components/ui/separator";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -156,22 +156,19 @@ export function RichEmailEditor({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Initialize editor content when (re-)entering visual mode. The previous
-  // implementation guarded with a `hasInitialized` ref that was never reset,
-  // so switching to Preview/HTML and back unmounted the contentEditable div
-  // and the freshly-mounted replacement was left blank — the user's typing
-  // appeared to vanish. We now reset the guard whenever we leave visual mode
-  // so a remount triggers the init again.
+  // Initialize editor content when (re-)entering visual mode. Placeholder is
+  // rendered via CSS (:empty::before) — never injected as content — so the
+  // user starts on an empty paragraph and can just type.
   useEffect(() => {
     if (mode !== "visual") {
       hasInitialized.current = false;
       return;
     }
     if (editorRef.current && !hasInitialized.current && mounted) {
-      editorRef.current.innerHTML = value || `<p>${placeholder}</p>`;
+      editorRef.current.innerHTML = value || "";
       hasInitialized.current = true;
     }
-  }, [mode, placeholder, value, mounted]);
+  }, [mode, value, mounted]);
 
   // Save selection before inserting
   const saveSelection = () => {
@@ -252,36 +249,60 @@ export function RichEmailEditor({
     }
   };
 
-  // Handle link insertion
+  // Handle link insertion. Opens the popover whether or not the user has
+  // selected text — if they haven't, the URL itself becomes the link text
+  // when they confirm.
   const handleLinkClick = () => {
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.toString().length === 0) {
-      return;
+    // Save the exact range NOW before the input steals focus. Range may be
+    // a collapsed cursor (no selection) — that's fine, insertLink handles
+    // both cases.
+    if (selection && selection.rangeCount > 0 && editorRef.current?.contains(selection.anchorNode)) {
+      savedLinkRange.current = selection.getRangeAt(0).cloneRange();
+    } else {
+      savedLinkRange.current = null;
     }
-    // Save the exact range NOW before the input steals focus
-    savedLinkRange.current = selection.getRangeAt(0).cloneRange();
     setShowLinkInput(true);
     setTimeout(() => linkInputRef.current?.focus(), 0);
   };
 
   const insertLink = (overrideUrl?: string) => {
-    const urlToUse = overrideUrl ?? linkUrl;
-    if (urlToUse && editorRef.current && savedLinkRange.current) {
-      // Restore the editor focus and the saved selection
-      editorRef.current.focus();
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(savedLinkRange.current);
-      }
-      document.execCommand("createLink", false, urlToUse);
-      // Make all created links open in new tab and have blue underline style
-      editorRef.current.querySelectorAll('a').forEach((a) => {
-        a.setAttribute('target', '_blank');
-        a.setAttribute('rel', 'noopener noreferrer');
-      });
-      onChange(editorRef.current.innerHTML);
+    const urlToUse = (overrideUrl ?? linkUrl).trim();
+    if (!urlToUse || !editorRef.current) {
+      savedLinkRange.current = null;
+      setShowLinkInput(false);
+      setLinkUrl("");
+      return;
     }
+
+    // Restore the editor focus and the saved selection (if any).
+    editorRef.current.focus();
+    const sel = window.getSelection();
+    if (sel && savedLinkRange.current) {
+      sel.removeAllRanges();
+      sel.addRange(savedLinkRange.current);
+    }
+
+    const hasSelectedText =
+      savedLinkRange.current && !savedLinkRange.current.collapsed
+      && savedLinkRange.current.toString().length > 0;
+
+    if (hasSelectedText) {
+      // Wrap the existing selected text as a link.
+      document.execCommand("createLink", false, urlToUse);
+    } else {
+      // No selection — insert the URL itself as the link text at the cursor.
+      const safeText = urlToUse.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const html = `<a href="${urlToUse}" target="_blank" rel="noopener noreferrer">${safeText}</a>&nbsp;`;
+      insertAtCursor(html);
+    }
+
+    // Make all links in the editor open in new tab.
+    editorRef.current.querySelectorAll('a').forEach((a) => {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+    });
+    onChange(editorRef.current.innerHTML);
     savedLinkRange.current = null;
     setShowLinkInput(false);
     setLinkUrl("");
@@ -640,26 +661,51 @@ export function RichEmailEditor({
             
             <Separator orientation="vertical" className="h-6 mx-1" />
             
-            {/* Insert */}
-            <div className="relative">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 gap-1.5"
-                onMouseDown={(e) => { e.preventDefault(); handleLinkClick(); }}
-                disabled={showLinkInput}
-              >
-                <Link className="h-4 w-4" />
-                <span className="text-xs">Link</span>
-              </Button>
-              
-              {showLinkInput && (
-                <div
-                  className="absolute top-full left-0 mt-1 z-50 bg-popover border rounded-md shadow-md p-3 w-72 max-w-[calc(100vw-2rem)] space-y-3"
-                  // Stop clicks inside the popover from bubbling out and
-                  // collapsing the saved selection.
-                  onMouseDown={(e) => e.stopPropagation()}
+            {/* Insert. PopoverAnchor (not Trigger) positions the popover
+                without intercepting clicks — the trigger button is fully
+                controlled by `showLinkInput` state. Using PopoverTrigger
+                caused a mousedown→open + click→close race that flashed the
+                popover open for a frame and immediately dismissed it. */}
+            <Popover
+              open={showLinkInput}
+              onOpenChange={(o) => {
+                if (!o) {
+                  setShowLinkInput(false);
+                  setLinkUrl("");
+                  savedLinkRange.current = null;
+                }
+              }}
+            >
+              <PopoverAnchor asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 gap-1.5"
+                  // onMouseDown fires before focus moves, so we capture the
+                  // current selection range BEFORE the popover takes focus.
+                  // preventDefault keeps the editor's contenteditable
+                  // selection alive while the button takes focus.
+                  onMouseDown={(e) => { e.preventDefault(); handleLinkClick(); }}
                 >
+                  <Link className="h-4 w-4" />
+                  <span className="text-xs">Link</span>
+                </Button>
+              </PopoverAnchor>
+              <PopoverContent
+                side="bottom"
+                align="start"
+                sideOffset={4}
+                collisionPadding={12}
+                // Radix handles collision detection (flip + shift) so the
+                // popover never bleeds outside the dialog/viewport.
+                className="w-[min(20rem,calc(100vw-1.5rem))] p-3 space-y-3"
+                onMouseDown={(e) => e.stopPropagation()}
+                onOpenAutoFocus={(e) => {
+                  // Don't autofocus the wrapper; we explicitly focus the
+                  // URL input via linkInputRef inside handleLinkClick.
+                  e.preventDefault();
+                }}
+              >
                   {/* Saved links from Settings → Links */}
                   {savedLinks.length > 0 && (
                     <div className="space-y-1.5">
@@ -745,9 +791,8 @@ export function RichEmailEditor({
                       </p>
                     )}
                   </div>
-                </div>
-              )}
-            </div>
+              </PopoverContent>
+            </Popover>
             
             <Button
               variant="ghost"
@@ -908,6 +953,7 @@ export function RichEmailEditor({
             <div
               ref={editorRef}
               contentEditable
+              data-placeholder={placeholder}
               onInput={handleEditorInput}
               onMouseUp={saveSelection}
               onKeyUp={saveSelection}
@@ -915,7 +961,13 @@ export function RichEmailEditor({
               // word-break + overflow-wrap stop a long pasted URL (or any
               // unbroken string) from forcing the parent dialog to scroll
               // sideways. max-w-full keeps the editor pinned to the dialog.
-              className="min-h-[300px] max-w-full p-4 rounded-md border border-input text-foreground resize-y overflow-auto focus:outline-none focus:ring-2 focus:ring-ring focus:border-input [&_a]:text-blue-600 [&_a]:underline [&_a]:cursor-pointer dark:[&_a]:text-blue-400 [&_a]:break-all [&_img]:max-w-full"
+              // List styles are explicit because Tailwind preflight resets
+              // them, otherwise execCommand insertUnordered/OrderedList shows
+              // no bullets/numbers.
+              // resize-none + no inner overflow so the editor grows with
+              // its content and the parent dialog handles all scrolling.
+              // Nested scroll containers used to trap the cursor mid-edit.
+              className="rich-editor-content min-h-[300px] max-w-full p-4 rounded-md border border-input text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:border-input [&_a]:text-blue-600 [&_a]:underline [&_a]:cursor-pointer dark:[&_a]:text-blue-400 [&_a]:break-all [&_img]:max-w-full [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-0.5 [&_blockquote]:border-l-4 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground"
               style={{ minHeight, wordBreak: "break-word", overflowWrap: "anywhere" }}
             />
             <p className="text-[10px] text-muted-foreground mt-2">
